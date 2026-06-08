@@ -46,6 +46,7 @@ function formatCost(cost: Partial<Resources>) {
     food: 'еды',
     wood: 'дер',
     stone: 'кам',
+    iron: 'жел',
     population: 'нас',
   };
 
@@ -69,6 +70,16 @@ function createMaterial(scene: Scene, name: string, color: Color3) {
   return material;
 }
 
+function applyQueuedPreview(root: Mesh, building: Building) {
+  if (building.status !== 'queued') {
+    return;
+  }
+
+  root.getChildMeshes().forEach((mesh) => {
+    mesh.visibility = 0.46;
+  });
+}
+
 function createBuilding(scene: Scene, building: Building, parent: Mesh, materials: Record<string, StandardMaterial>, index: number) {
   const root = new Mesh(`building-root-${building.id}`, scene);
   const fallbackX = -5 + (index % 6) * 2;
@@ -87,6 +98,7 @@ function createBuilding(scene: Scene, building: Building, parent: Mesh, material
     roof.parent = root;
     roof.position.y = 3.2;
     roof.material = materials.house;
+    applyQueuedPreview(root, building);
     return root;
   }
 
@@ -100,6 +112,7 @@ function createBuilding(scene: Scene, building: Building, parent: Mesh, material
     barn.parent = root;
     barn.position = new Vector3(-0.55, 0.42, 0);
     barn.material = materials.house;
+    applyQueuedPreview(root, building);
     return root;
   }
 
@@ -162,6 +175,7 @@ function createBuilding(scene: Scene, building: Building, parent: Mesh, material
     }
   }
 
+  applyQueuedPreview(root, building);
   return root;
 }
 
@@ -201,8 +215,9 @@ export function CastleScene({ castle, country, buildingCatalog, onBack, onBuild 
       watchtower: createMaterial(scene, 'mat-watchtower', materialColors.watchtower),
     };
 
-    castle.buildings.forEach((building, index) => createBuilding(scene, building, root, materials, index));
-  }, [castle.buildings]);
+    const visibleBuildings = [...castle.buildings, ...castle.constructionQueue];
+    visibleBuildings.forEach((building, index) => createBuilding(scene, building, root, materials, index));
+  }, [castle.buildings, castle.constructionQueue]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -210,9 +225,9 @@ export function CastleScene({ castle, country, buildingCatalog, onBack, onBuild 
       return;
     }
 
-    const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    const engine = new Engine(canvas, true, { alpha: true, preserveDrawingBuffer: true, stencil: true });
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.05, 0.07, 0.1, 1);
+    scene.clearColor = new Color4(0.05, 0.07, 0.1, 0);
 
     const camera = new ArcRotateCamera('camera', -Math.PI / 2.4, Math.PI / 2.8, 20, new Vector3(0, 0, 0), scene);
     camera.attachControl(canvas, true);
@@ -225,6 +240,7 @@ export function CastleScene({ castle, country, buildingCatalog, onBack, onBuild 
     const groundMaterial = createMaterial(scene, 'ground-material', materialColors.ground);
     const wallMaterial = createMaterial(scene, 'wall-material', materialColors.wall);
     const gridMaterial = createMaterial(scene, 'grid-material', materialColors.grid);
+    groundMaterial.alpha = 0.92;
     gridMaterial.alpha = 0.35;
 
     const ground = MeshBuilder.CreateGround('build-ground', { width: 16, height: 16 }, scene);
@@ -283,7 +299,6 @@ export function CastleScene({ castle, country, buildingCatalog, onBack, onBuild 
 
     const resize = () => engine.resize();
     window.addEventListener('resize', resize);
-    renderBuildings();
 
     return () => {
       window.removeEventListener('resize', resize);
@@ -292,7 +307,7 @@ export function CastleScene({ castle, country, buildingCatalog, onBack, onBuild 
       sceneRef.current = null;
       buildingsRootRef.current = null;
     };
-  }, [castle.id, onBuild, renderBuildings]);
+  }, [castle.id, onBuild]);
 
   useEffect(() => {
     renderBuildings();
@@ -327,6 +342,16 @@ export function CastleScene({ castle, country, buildingCatalog, onBack, onBuild 
               );
             })}
           </div>
+          {castle.constructionQueue.length > 0 && (
+            <div className="build-queue">
+              <strong>Очередь</strong>
+              {castle.constructionQueue.map((building) => (
+                <span key={building.id}>
+                  {BUILDING_LABELS[building.type]} · {building.remainingDays} дн.
+                </span>
+              ))}
+            </div>
+          )}
           <div className={hasResources ? 'hint' : 'hint hint-warning'}>
             Выбрано: {BUILDING_LABELS[selectedType]}. Кликни по клетке внутри стен, чтобы построить.
           </div>

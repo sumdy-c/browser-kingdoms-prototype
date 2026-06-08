@@ -101,6 +101,7 @@ export interface Kingdom {
   traits: string[];
   aiFocus: BuildingType[];
   capitalRegionId: string;
+  baseBuildLimit?: number;
   resources: Resources;
   policies: {
     taxation: 'low' | 'balanced' | 'war';
@@ -163,8 +164,8 @@ export interface WorldMapState {
   width: number;
   height: number;
   image: string;
-  borders: string;
-  labels: string;
+  borders?: string;
+  labels?: string;
   minimap: string;
 }
 

@@ -177,7 +177,13 @@ function App() {
       return;
     }
 
-    sendAction('holding:build', { holdingId, type: request.type });
+    sendAction('holding:build', {
+      holdingId,
+      type: request.type,
+      x: request.x,
+      z: request.z,
+      rotation: request.rotation,
+    });
   }, [selectedHoldingId, sendAction, showNotice]);
 
   const toggleMode = useCallback(() => {

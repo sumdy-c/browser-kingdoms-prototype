@@ -59,6 +59,10 @@ Implementation note:
 
 For the first playable version, borders, labels, hover states, and selected-country highlights should preferably be rendered with OpenLayers/CSS/HTML overlays. Separate PNG overlays can be added later if we want a more hand-painted look.
 
+Current implementation note:
+
+`WorldMap.tsx` renders borders, kingdom labels, crest markers, selection fills, and holding markers at runtime from backend world data. Treat `world-map-borders.png`, `world-map-labels.png`, and `world-map-highlights.png` as optional/legacy placeholders until new overlays are generated from the approved `world-map-painted.png` with exactly matching dimensions and geography.
+
 ## Decorative Map UI Assets
 
 Transparent PNG assets.

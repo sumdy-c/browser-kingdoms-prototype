@@ -1,6 +1,10 @@
 const MAX_EVENTS = 120;
 const MAP_WIDTH = 1619;
 const MAP_HEIGHT = 971;
+const BUILD_GRID_LIMIT = 7;
+const DEFAULT_BUILD_SLOTS = [-6, -4, -2, 0, 2, 4, 6].flatMap((z) => (
+  [-6, -4, -2, 0, 2, 4, 6].map((x) => [x, z])
+));
 
 export const resourceKeys = [
   'gold',
@@ -320,10 +324,8 @@ export function createInitialWorld(tickMs) {
     map: {
       width: MAP_WIDTH,
       height: MAP_HEIGHT,
-      image: '/assets/map/world-map-painted.png',
-      borders: '/assets/map/world-map-borders.png',
-      labels: '/assets/map/world-map-labels.png',
-      minimap: '/assets/map/world-map-minimap.png',
+      image: '/assets/map/world-map-painted.png?v=20260609',
+      minimap: '/assets/map/world-map-minimap.png?v=20260609',
     },
     kingdoms,
     regions,
@@ -353,6 +355,7 @@ function createKingdom(seed) {
     traits: seed.traits,
     aiFocus: seed.aiFocus,
     capitalRegionId: seed.capitalRegionId,
+    baseBuildLimit: seed.resources.buildLimit,
     resources: { ...seed.resources },
     policies: {
       taxation: 'balanced',
@@ -403,23 +406,77 @@ function holding(id, name, kind, mapPoint, buildings, garrison) {
 }
 
 function createCompletedBuilding(holdingId, type, index = 0) {
+  const placement = defaultBuildSlot(index);
   return {
     id: `${holdingId}-${type}-${index}`,
     holdingId,
     type,
     status: 'active',
     remainingDays: 0,
+    ...placement,
   };
 }
 
-function createQueuedBuilding(holdingId, type) {
+function createQueuedBuilding(holdingId, type, placement = {}) {
   return {
     id: `${holdingId}-${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     holdingId,
     type,
     status: 'queued',
     remainingDays: buildingCatalog[type].buildDays,
+    ...placement,
   };
+}
+
+function defaultBuildSlot(index) {
+  const slot = DEFAULT_BUILD_SLOTS[index % DEFAULT_BUILD_SLOTS.length];
+  return { x: slot[0], z: slot[1], rotation: 0 };
+}
+
+function normalizeRotation(value) {
+  const rotation = Number(value);
+  return Number.isFinite(rotation) ? rotation : 0;
+}
+
+function isBuildSlotTaken(holding, x, z) {
+  return [...holding.buildings, ...holding.constructionQueue].some((building) => (
+    typeof building.x === 'number'
+    && typeof building.z === 'number'
+    && building.x === x
+    && building.z === z
+  ));
+}
+
+function findOpenBuildSlot(holding, fallbackIndex) {
+  for (let offset = 0; offset < DEFAULT_BUILD_SLOTS.length; offset += 1) {
+    const placement = defaultBuildSlot(fallbackIndex + offset);
+    if (!isBuildSlotTaken(holding, placement.x, placement.z)) {
+      return placement;
+    }
+  }
+
+  return null;
+}
+
+function resolveBuildPlacement(holding, payload, fallbackIndex) {
+  const hasRequestedSlot = Number.isFinite(Number(payload.x)) && Number.isFinite(Number(payload.z));
+  const placement = hasRequestedSlot
+    ? { x: Math.round(Number(payload.x)), z: Math.round(Number(payload.z)), rotation: normalizeRotation(payload.rotation) }
+    : findOpenBuildSlot(holding, fallbackIndex);
+
+  if (!placement) {
+    return { ok: false, reason: 'Внутри стен нет свободной клетки.' };
+  }
+
+  if (Math.abs(placement.x) > BUILD_GRID_LIMIT || Math.abs(placement.z) > BUILD_GRID_LIMIT) {
+    return { ok: false, reason: 'Клетка за пределами замка.' };
+  }
+
+  if (isBuildSlotTaken(holding, placement.x, placement.z)) {
+    return { ok: false, reason: hasRequestedSlot ? 'Клетка уже занята.' : 'Внутри стен нет свободной клетки.' };
+  }
+
+  return { ok: true, placement };
 }
 
 function createMarket() {
@@ -560,10 +617,13 @@ export function dispatchWorldAction(world, socketId, action = {}) {
   return { ok: false, reason: 'Неизвестное действие.' };
 }
 
-export function buildInCastle(world, socketId, request) {
+export function buildInCastle(world, socketId, request = {}) {
   return queueBuilding(world, socketId, {
-    holdingId: request.castleId,
+    holdingId: request.holdingId ?? request.castleId,
     type: request.type,
+    x: request.x,
+    z: request.z,
+    rotation: request.rotation,
   });
 }
 
@@ -587,7 +647,7 @@ function setTimeControls(world, socketId, payload) {
   return { ok: true };
 }
 
-function queueBuilding(world, socketId, payload) {
+function queueBuilding(world, socketId, payload = {}) {
   const holding = world.holdings.find((item) => item.id === payload.holdingId);
   const type = payload.type;
 
@@ -616,8 +676,13 @@ function queueBuilding(world, socketId, payload) {
     return { ok: false, reason: 'Недостаточно ресурсов.' };
   }
 
+  const placementResult = resolveBuildPlacement(holding, payload, activeAndQueued);
+  if (!placementResult.ok) {
+    return placementResult;
+  }
+
   payCost(kingdom.resources, catalog.cost);
-  holding.constructionQueue.push(createQueuedBuilding(holding.id, type));
+  holding.constructionQueue.push(createQueuedBuilding(holding.id, type, placementResult.placement));
   pushEvent(world, 'construction', 'Строительство начато', `${kingdom.name}: ${catalog.label} поставлено в очередь во владении ${holding.name}.`, kingdom.id);
 
   return { ok: true };
@@ -894,6 +959,8 @@ function applyKingdomEconomy(world, kingdom) {
     }
   }
 
+  syncBuildLimit(kingdom, holdings);
+
   const taxMultiplier = kingdom.policies.taxation === 'war' ? 1.25 : kingdom.policies.taxation === 'low' ? 0.72 : 1;
   const militaryMultiplier = kingdom.policies.military === 'levies' ? 1.18 : kingdom.policies.military === 'raiders' ? 1.08 : 0.92;
   const researchBonus = kingdom.policies.research === 'engineering' ? 2 : kingdom.policies.research === 'military' ? 1 : 1;
@@ -958,9 +1025,17 @@ function advanceConstruction(world, kingdom) {
       activeBuild.remainingDays = 0;
       holdingItem.buildings.push(activeBuild);
       holdingItem.constructionQueue.shift();
+      syncBuildLimit(kingdom, holdings);
       pushEvent(world, 'construction', 'Постройка завершена', `${kingdom.name}: ${buildingCatalog[activeBuild.type].label} завершена во владении ${holdingItem.name}.`, kingdom.id);
     }
   }
+}
+
+function syncBuildLimit(kingdom, holdings) {
+  const buildLimitBonus = holdings
+    .flatMap((item) => item.buildings)
+    .reduce((sum, building) => sum + (buildingCatalog[building.type]?.effects?.buildLimit ?? 0), 0);
+  kingdom.resources.buildLimit = clampResource((kingdom.baseBuildLimit ?? 4) + buildLimitBonus);
 }
 
 function updateMarket(world) {
@@ -987,8 +1062,13 @@ function runAi(world) {
       .sort((a, b) => a.constructionQueue.length - b.constructionQueue.length)[0];
 
     if (preferred && holdingItem && Math.random() < 0.72) {
+      const placementResult = resolveBuildPlacement(holdingItem, {}, holdingItem.buildings.length + holdingItem.constructionQueue.length);
+      if (!placementResult.ok) {
+        continue;
+      }
+
       payCost(kingdom.resources, buildingCatalog[preferred].cost);
-      holdingItem.constructionQueue.push(createQueuedBuilding(holdingItem.id, preferred));
+      holdingItem.constructionQueue.push(createQueuedBuilding(holdingItem.id, preferred, placementResult.placement));
       pushEvent(world, 'construction', 'AI строит', `${kingdom.name} начинает строительство: ${buildingCatalog[preferred].label}.`, kingdom.id);
     }
 

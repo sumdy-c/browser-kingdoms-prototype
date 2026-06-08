@@ -646,18 +646,29 @@ input {
 .world-map-shell {
   min-height: 0;
   overflow: hidden;
-  display: grid;
-  grid-template-rows: auto 1fr;
+  height: 100%;
+  position: relative;
 }
 
 .map-toolbar {
-  min-height: 62px;
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 5;
+  width: min(640px, calc(100% - 228px));
+  min-height: 58px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(222, 177, 89, 0.26);
+  border: 1px solid rgba(222, 177, 89, 0.34);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(15, 18, 24, 0.9), rgba(8, 10, 15, 0.94)),
+    url("/assets/backgrounds/panel-noise.png") center / 380px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(6px);
 }
 
 .map-layer-buttons {
@@ -666,12 +677,52 @@ input {
 }
 
 .map-stage {
+  height: 100%;
   min-height: 0;
   background: #071019;
 }
 
 .map-stage .ol-viewport {
   background: #071019;
+}
+
+.map-compass {
+  position: absolute;
+  right: 24px;
+  bottom: 126px;
+  z-index: 4;
+  width: 92px;
+  height: 92px;
+  object-fit: contain;
+  opacity: 0.72;
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.55));
+  pointer-events: none;
+}
+
+.map-minimap {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  width: 184px;
+  aspect-ratio: 16 / 9;
+  padding: 4px;
+  border: 1px solid rgba(222, 177, 89, 0.38);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(13, 16, 22, 0.88), rgba(7, 9, 14, 0.95)),
+    url("/assets/backgrounds/panel-noise.png") center / 360px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+  pointer-events: none;
+}
+
+.map-minimap img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 5px;
+  filter: saturate(0.9) brightness(0.9);
 }
 
 .command-panel {
@@ -1051,7 +1102,7 @@ meter {
 
 .castle-app {
   background:
-    linear-gradient(rgba(4, 6, 10, 0.32), rgba(4, 6, 10, 0.82)),
+    linear-gradient(rgba(4, 6, 10, 0.42), rgba(4, 6, 10, 0.78)),
     url("/assets/backgrounds/castle-yard-backdrop.png") center / cover fixed;
 }
 
@@ -1089,7 +1140,7 @@ meter {
 
 .castle-layout {
   display: grid;
-  grid-template-columns: 330px 1fr;
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 12px;
   min-height: calc(100vh - 106px);
 }
@@ -1113,6 +1164,25 @@ meter {
 .build-list {
   display: grid;
   gap: 8px;
+}
+
+.build-queue {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid rgba(222, 177, 89, 0.24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.build-queue strong {
+  color: #ffe2a0;
+}
+
+.build-queue span {
+  color: #d9c9a7;
+  font-size: 12px;
 }
 
 .build-button {
@@ -1167,5 +1237,8 @@ meter {
   border: 1px solid rgba(222, 177, 89, 0.34);
   border-radius: 8px;
   outline: none;
-  background: #05070d;
+  background:
+    linear-gradient(180deg, rgba(5, 7, 11, 0.16), rgba(5, 7, 11, 0.48)),
+    url("/assets/backgrounds/castle-yard-backdrop.png") center / cover;
+  box-shadow: inset 0 0 90px rgba(0, 0, 0, 0.34), 0 16px 48px rgba(0, 0, 0, 0.32);
 }

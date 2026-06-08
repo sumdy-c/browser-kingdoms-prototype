@@ -1,0 +1,45 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "kind": "country", "countryId": "elvaria", "name": "Эльвария", "capital": "Серебряный Клык" },
+      "geometry": { "type": "Polygon", "coordinates": [[[1, 8], [5, 11], [9, 9], [8, 5], [4, 4], [1, 6], [1, 8]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "country", "countryId": "nordheim", "name": "Нордхейм", "capital": "Хладный Шпиль" },
+      "geometry": { "type": "Polygon", "coordinates": [[[8, 12], [14, 13], [18, 10], [16, 6], [10, 6], [8, 9], [8, 12]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "country", "countryId": "varanta", "name": "Варанта", "capital": "Каменный Порт" },
+      "geometry": { "type": "Polygon", "coordinates": [[[3, 3], [8, 5], [10, 2], [8, -2], [3, -3], [0, 0], [3, 3]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "country", "countryId": "morven", "name": "Морвен", "capital": "Красный Вал" },
+      "geometry": { "type": "Polygon", "coordinates": [[[10, 5], [16, 5], [19, 2], [18, -2], [13, -3], [9, 0], [10, 5]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "country", "countryId": "sudmark", "name": "Судмарк", "capital": "Южные Врата" },
+      "geometry": { "type": "Polygon", "coordinates": [[[2, -4], [7, -3], [10, -6], [8, -10], [3, -11], [-1, -7], [2, -4]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "country", "countryId": "aurelia", "name": "Аурелия", "capital": "Золотая Башня" },
+      "geometry": { "type": "Polygon", "coordinates": [[[10, -4], [17, -3], [20, -7], [17, -11], [11, -10], [8, -7], [10, -4]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "country", "countryId": "fenria", "name": "Фенрия", "capital": "Волчий Мост" },
+      "geometry": { "type": "Polygon", "coordinates": [[[-6, 5], [0, 6], [1, 2], [-1, -1], [-6, -1], [-9, 2], [-6, 5]]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "kind": "country", "countryId": "drakonia", "name": "Дракония", "capital": "Пепельная Корона" },
+      "geometry": { "type": "Polygon", "coordinates": [[[-7, -2], [-1, -2], [1, -6], [-2, -11], [-8, -10], [-11, -6], [-7, -2]]] }
+    }
+  ]
+}

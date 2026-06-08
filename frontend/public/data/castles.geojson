@@ -1,0 +1,13 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    { "type": "Feature", "properties": { "kind": "castle", "castleId": "elv-silverfang", "countryId": "elvaria", "name": "Серебряный Клык" }, "geometry": { "type": "Point", "coordinates": [4.8, 7.6] } },
+    { "type": "Feature", "properties": { "kind": "castle", "castleId": "nor-frostspire", "countryId": "nordheim", "name": "Хладный Шпиль" }, "geometry": { "type": "Point", "coordinates": [13.2, 9.2] } },
+    { "type": "Feature", "properties": { "kind": "castle", "castleId": "var-stoneport", "countryId": "varanta", "name": "Каменный Порт" }, "geometry": { "type": "Point", "coordinates": [5.8, 0.4] } },
+    { "type": "Feature", "properties": { "kind": "castle", "castleId": "mor-redwall", "countryId": "morven", "name": "Красный Вал" }, "geometry": { "type": "Point", "coordinates": [14.8, 1.1] } },
+    { "type": "Feature", "properties": { "kind": "castle", "castleId": "sud-southgate", "countryId": "sudmark", "name": "Южные Врата" }, "geometry": { "type": "Point", "coordinates": [4.9, -7.2] } },
+    { "type": "Feature", "properties": { "kind": "castle", "castleId": "aur-goldtower", "countryId": "aurelia", "name": "Золотая Башня" }, "geometry": { "type": "Point", "coordinates": [14.8, -7.4] } },
+    { "type": "Feature", "properties": { "kind": "castle", "castleId": "fen-wolfbridge", "countryId": "fenria", "name": "Волчий Мост" }, "geometry": { "type": "Point", "coordinates": [-4.2, 1.8] } },
+    { "type": "Feature", "properties": { "kind": "castle", "castleId": "dra-ashcrown", "countryId": "drakonia", "name": "Пепельная Корона" }, "geometry": { "type": "Point", "coordinates": [-5.2, -6.4] } }
+  ]
+}

@@ -1,0 +1,34 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: mf-game-backend
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      CLIENT_ORIGIN: http://localhost:5173
+      TICK_MS: 5000
+    networks:
+      - mf-game
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: mf-game-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_SOCKET_URL: http://localhost:3001
+      VITE_GEOSERVER_WFS_COUNTRIES_URL: ""
+      VITE_GEOSERVER_WFS_CASTLES_URL: ""
+      VITE_GEOSERVER_WMS_URL: ""
+      VITE_GEOSERVER_WMS_LAYER: ""
+    depends_on:
+      - backend
+    networks:
+      - mf-game
+
+networks:
+  mf-game:
+    driver: bridge

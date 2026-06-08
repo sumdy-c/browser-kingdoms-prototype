@@ -1,55 +1,81 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { PlayerProfile } from '../types';
+import { KINGDOM_ASSETS } from '../types';
 
 interface BootScreenProps {
   onComplete: (profile: PlayerProfile) => void;
 }
 
-const bootLines = [
-  'Соединяемся с серверами MF.Game...',
-  'Проверяем игровой профиль...',
-  'Синхронизируем карту мира...',
-  'Открываем стратегический канал...',
-];
+const startingKingdoms = [
+  { id: 'riverland', name: 'Riverland', note: 'торговля, еда, стабильный старт' },
+  { id: 'nordgard', name: 'Nordgard', note: 'армия, лес, суровый север' },
+  { id: 'caldoria', name: 'Caldoria', note: 'золото, рынок, богатые города' },
+  { id: 'velund', name: 'Velund', note: 'леса, луки, сильная оборона' },
+  { id: 'solaria', name: 'Solaria', note: 'влияние, вера, развитые земли' },
+  { id: 'dragonridge', name: 'Dragonridge', note: 'железо, крепости, рейды' },
+  { id: 'morven', name: 'Morven', note: 'порты, риск, быстрые налёты' },
+  { id: 'frostheim', name: 'Frostheim', note: 'камень, лёд, прочная защита' },
+] as const;
 
 export function BootScreen({ onComplete }: BootScreenProps) {
-  const [step, setStep] = useState(0);
-  const nickname = useMemo(() => `Gamer${Math.floor(1000 + Math.random() * 8999)}`, []);
+  const [selectedKingdomId, setSelectedKingdomId] = useState<(typeof startingKingdoms)[number]['id']>('riverland');
+  const nickname = useMemo(() => `Founder${Math.floor(1000 + Math.random() * 8999)}`, []);
 
-  useEffect(() => {
-    if (step >= bootLines.length) {
-      const timeoutId = window.setTimeout(() => {
-        onComplete({
-          id: crypto.randomUUID(),
-          nickname,
-          role: 'king',
-        });
-      }, 500);
-
-      return () => window.clearTimeout(timeoutId);
-    }
-
-    const timeoutId = window.setTimeout(() => setStep((value) => value + 1), 650);
-    return () => window.clearTimeout(timeoutId);
-  }, [nickname, onComplete, step]);
+  const selectedKingdom = startingKingdoms.find((kingdom) => kingdom.id === selectedKingdomId) ?? startingKingdoms[0];
 
   return (
-    <div className="boot-screen">
-      <div className="boot-card">
-        <div className="boot-logo">MF.Game</div>
-        <div className="boot-subtitle">browser grand strategy network</div>
-
-        <div className="boot-progress">
-          {bootLines.map((line, index) => (
-            <div className={index <= step ? 'boot-line boot-line-active' : 'boot-line'} key={line}>
-              <span>{index < step ? '✓' : index === step ? '…' : ' '}</span>
-              {line}
-            </div>
-          ))}
+    <main className="boot-screen">
+      <div className="boot-background" />
+      <section className="boot-hero">
+        <img className="boot-logo-image" src="/assets/branding/logo-full.png" alt="MF.Game" />
+        <div className="boot-copy">
+          <strong>Single-player survival strategy MVP</strong>
+          <span>Выбери державу. Мир будет жить, строиться, торговать и нападать даже без мультиплеера.</span>
         </div>
+      </section>
 
-        <div className="boot-user">Добро пожаловать, {nickname}</div>
-      </div>
-    </div>
+      <section className="kingdom-picker">
+        {startingKingdoms.map((kingdom) => {
+          const assets = KINGDOM_ASSETS[kingdom.id];
+          const selected = kingdom.id === selectedKingdomId;
+
+          return (
+            <button
+              className={selected ? 'kingdom-pick kingdom-pick-active' : 'kingdom-pick'}
+              key={kingdom.id}
+              onClick={() => setSelectedKingdomId(kingdom.id)}
+            >
+              <img className="kingdom-pick-card" src={assets.card} alt="" />
+              <span className="kingdom-pick-shade" />
+              <img className="kingdom-pick-crest" src={assets.crest} alt="" />
+              <strong>{kingdom.name}</strong>
+              <small>{kingdom.note}</small>
+            </button>
+          );
+        })}
+      </section>
+
+      <footer className="boot-footer">
+        <div>
+          <span>Профиль</span>
+          <strong>{nickname}</strong>
+        </div>
+        <button
+          className="gold-button"
+          onClick={() =>
+            onComplete({
+              id: crypto.randomUUID(),
+              nickname,
+              role: 'ruler',
+              mode: 'player',
+              selectedKingdomId: selectedKingdom.id,
+              selectedCountryId: selectedKingdom.id,
+            })
+          }
+        >
+          Начать за {selectedKingdom.name}
+        </button>
+      </footer>
+    </main>
   );
 }

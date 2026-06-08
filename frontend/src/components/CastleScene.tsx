@@ -12,12 +12,13 @@ import {
   StandardMaterial,
   Vector3,
 } from '@babylonjs/core';
-import type { BuildRequest, Building, BuildingType, Castle, Country, Resources } from '../types';
-import { BUILDING_COSTS, BUILDING_LABELS } from '../types';
+import type { BuildRequest, Building, BuildingCatalogItem, BuildingType, Castle, Country, Resources } from '../types';
+import { BUILDING_LABELS } from '../types';
 
 interface CastleSceneProps {
   castle: Castle;
   country?: Country;
+  buildingCatalog: Record<BuildingType, BuildingCatalogItem>;
   onBack: () => void;
   onBuild: (request: BuildRequest) => void;
 }
@@ -30,8 +31,10 @@ const materialColors: Record<BuildingType | 'ground' | 'grid' | 'wall', Color3> 
   warehouse: new Color3(0.55, 0.46, 0.36),
   lumberyard: new Color3(0.45, 0.28, 0.13),
   quarry: new Color3(0.42, 0.45, 0.49),
+  market: new Color3(0.73, 0.52, 0.24),
   barracks: new Color3(0.55, 0.19, 0.18),
-  tower: new Color3(0.45, 0.45, 0.52),
+  archeryRange: new Color3(0.34, 0.48, 0.24),
+  watchtower: new Color3(0.45, 0.45, 0.52),
   ground: new Color3(0.22, 0.3, 0.24),
   grid: new Color3(0.75, 0.75, 0.65),
   wall: new Color3(0.36, 0.36, 0.4),
@@ -66,17 +69,19 @@ function createMaterial(scene: Scene, name: string, color: Color3) {
   return material;
 }
 
-function createBuilding(scene: Scene, building: Building, parent: Mesh, materials: Record<string, StandardMaterial>) {
+function createBuilding(scene: Scene, building: Building, parent: Mesh, materials: Record<string, StandardMaterial>, index: number) {
   const root = new Mesh(`building-root-${building.id}`, scene);
+  const fallbackX = -5 + (index % 6) * 2;
+  const fallbackZ = -3 + Math.floor(index / 6) * 2;
   root.parent = parent;
-  root.position = new Vector3(building.x, 0, building.z);
-  root.rotation.y = building.rotation;
+  root.position = new Vector3(typeof building.x === 'number' ? building.x : fallbackX, 0, typeof building.z === 'number' ? building.z : fallbackZ);
+  root.rotation.y = building.rotation ?? 0;
 
-  if (building.type === 'tower') {
+  if (building.type === 'watchtower') {
     const tower = MeshBuilder.CreateCylinder(`tower-${building.id}`, { diameter: 0.9, height: 2.8, tessellation: 16 }, scene);
     tower.parent = root;
     tower.position.y = 1.4;
-    tower.material = materials.tower;
+    tower.material = materials.watchtower;
 
     const roof = MeshBuilder.CreateCylinder(`tower-roof-${building.id}`, { diameterTop: 0, diameterBottom: 1.25, height: 0.85, tessellation: 16 }, scene);
     roof.parent = root;
@@ -104,8 +109,10 @@ function createBuilding(scene: Scene, building: Building, parent: Mesh, material
     warehouse: { width: 1.8, height: 1.1, depth: 1.35 },
     lumberyard: { width: 1.7, height: 0.7, depth: 1.2 },
     quarry: { width: 1.4, height: 0.75, depth: 1.4 },
+    market: { width: 1.8, height: 0.9, depth: 1.6 },
     barracks: { width: 2.2, height: 1.0, depth: 1.1 },
-    tower: { width: 1, height: 2.2, depth: 1 },
+    archeryRange: { width: 2.2, height: 0.7, depth: 1.4 },
+    watchtower: { width: 1, height: 2.2, depth: 1 },
   };
 
   const size = sizes[building.type];
@@ -114,7 +121,7 @@ function createBuilding(scene: Scene, building: Building, parent: Mesh, material
   body.position.y = size.height / 2;
   body.material = materials[building.type];
 
-  if (building.type === 'house' || building.type === 'warehouse' || building.type === 'barracks') {
+  if (building.type === 'house' || building.type === 'warehouse' || building.type === 'barracks' || building.type === 'market') {
     const roof = MeshBuilder.CreateCylinder(`roof-${building.id}`, {
       diameter: Math.max(size.width, size.depth) * 1.15,
       height: 0.65,
@@ -145,17 +152,27 @@ function createBuilding(scene: Scene, building: Building, parent: Mesh, material
     }
   }
 
+  if (building.type === 'archeryRange') {
+    for (let i = 0; i < 5; i += 1) {
+      const target = MeshBuilder.CreateCylinder(`target-${building.id}-${i}`, { diameter: 0.28, height: 0.08, tessellation: 16 }, scene);
+      target.parent = root;
+      target.position = new Vector3(-0.8 + i * 0.4, 0.45, 0.72);
+      target.rotation.x = Math.PI / 2;
+      target.material = materials.barracks;
+    }
+  }
+
   return root;
 }
 
-export function CastleScene({ castle, country, onBack, onBuild }: CastleSceneProps) {
+export function CastleScene({ castle, country, buildingCatalog, onBack, onBuild }: CastleSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sceneRef = useRef<Scene | null>(null);
   const buildingsRootRef = useRef<Mesh | null>(null);
   const [selectedType, setSelectedType] = useState<BuildingType>('house');
   const selectedTypeRef = useRef<BuildingType>('house');
 
-  const selectedCost = useMemo(() => BUILDING_COSTS[selectedType], [selectedType]);
+  const selectedCost = useMemo(() => buildingCatalog[selectedType].cost, [buildingCatalog, selectedType]);
   const hasResources = canAfford(country?.resources, selectedCost);
 
   useEffect(() => {
@@ -178,11 +195,13 @@ export function CastleScene({ castle, country, onBack, onBuild }: CastleScenePro
       warehouse: createMaterial(scene, 'mat-warehouse', materialColors.warehouse),
       lumberyard: createMaterial(scene, 'mat-lumberyard', materialColors.lumberyard),
       quarry: createMaterial(scene, 'mat-quarry', materialColors.quarry),
+      market: createMaterial(scene, 'mat-market', materialColors.market),
       barracks: createMaterial(scene, 'mat-barracks', materialColors.barracks),
-      tower: createMaterial(scene, 'mat-tower', materialColors.tower),
+      archeryRange: createMaterial(scene, 'mat-archery-range', materialColors.archeryRange),
+      watchtower: createMaterial(scene, 'mat-watchtower', materialColors.watchtower),
     };
 
-    castle.buildings.forEach((building) => createBuilding(scene, building, root, materials));
+    castle.buildings.forEach((building, index) => createBuilding(scene, building, root, materials, index));
   }, [castle.buildings]);
 
   useEffect(() => {
@@ -252,6 +271,7 @@ export function CastleScene({ castle, country, onBack, onBuild }: CastleScenePro
 
       onBuild({
         castleId: castle.id,
+        holdingId: castle.id,
         type: selectedTypeRef.current,
         x,
         z,
@@ -293,7 +313,7 @@ export function CastleScene({ castle, country, onBack, onBuild }: CastleScenePro
           <div className="panel-title">Строительство</div>
           <div className="build-list">
             {buildingTypes.map((type) => {
-              const affordable = canAfford(country?.resources, BUILDING_COSTS[type]);
+              const affordable = canAfford(country?.resources, buildingCatalog[type].cost);
               return (
                 <button
                   className={selectedType === type ? 'build-button build-button-active' : 'build-button'}
@@ -301,7 +321,7 @@ export function CastleScene({ castle, country, onBack, onBuild }: CastleScenePro
                   onClick={() => setSelectedType(type)}
                 >
                   <strong>{BUILDING_LABELS[type]}</strong>
-                  <span>{formatCost(BUILDING_COSTS[type])}</span>
+                  <span>{formatCost(buildingCatalog[type].cost)}</span>
                   {!affordable && <small>мало ресурсов</small>}
                 </button>
               );

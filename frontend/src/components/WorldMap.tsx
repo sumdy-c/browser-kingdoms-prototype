@@ -2,130 +2,231 @@ import { useEffect, useRef, useState } from 'react';
 import Map from 'ol/Map';
 import View from 'ol/View';
 import Feature from 'ol/Feature';
-import GeoJSON from 'ol/format/GeoJSON';
+import Projection from 'ol/proj/Projection';
+import ImageLayer from 'ol/layer/Image';
 import VectorLayer from 'ol/layer/Vector';
-import TileLayer from 'ol/layer/Tile';
+import Static from 'ol/source/ImageStatic';
 import VectorSource from 'ol/source/Vector';
-import TileWMS from 'ol/source/TileWMS';
-import { Fill, Stroke, Style, Circle as CircleStyle, Text } from 'ol/style';
-import { fromLonLat } from 'ol/proj';
+import Point from 'ol/geom/Point';
+import Polygon from 'ol/geom/Polygon';
 import type { Geometry } from 'ol/geom';
-import type { Castle, Country } from '../types';
-import { isGeoServerConfigured, mapSources } from '../services/mapSources';
+import { getCenter } from 'ol/extent';
+import { Fill, Icon, Stroke, Style, Text } from 'ol/style';
+import type { Holding, Kingdom, Region, WorldMapState } from '../types';
 
 interface WorldMapProps {
-  countries: Country[];
-  castles: Castle[];
-  selectedCountryId?: string;
-  selectedCastleId?: string;
-  onSelectCountry: (countryId: string) => void;
-  onOpenCastle: (castleId: string) => void;
+  mapState?: WorldMapState;
+  kingdoms: Kingdom[];
+  regions: Region[];
+  holdings: Holding[];
+  selectedKingdomId?: string;
+  selectedRegionId?: string;
+  selectedHoldingId?: string;
+  onSelectKingdom: (kingdomId: string) => void;
+  onSelectRegion: (regionId: string) => void;
+  onOpenHolding: (holdingId: string) => void;
 }
 
-const countryFallbackColors = ['#28405f', '#3a4f2a', '#5d3a2a', '#4b355d', '#315b55', '#6a562f', '#2f486a', '#653d4a'];
+type MapLayerKey = 'regions' | 'holdings' | 'borders' | 'labels';
 
-export function WorldMap({ countries, selectedCountryId, selectedCastleId, onSelectCountry, onOpenCastle }: WorldMapProps) {
+const defaultMap: WorldMapState = {
+  width: 1619,
+  height: 971,
+  image: '/assets/map/world-map-painted.png',
+  borders: '/assets/map/world-map-borders.png',
+  labels: '/assets/map/world-map-labels.png',
+  minimap: '/assets/map/world-map-minimap.png',
+};
+
+const markerByKind: Record<Holding['kind'], string> = {
+  capital: '/assets/map/marker-capital.png',
+  castle: '/assets/map/marker-castle.png',
+  city: '/assets/map/marker-city.png',
+  farm: '/assets/map/marker-farm.png',
+  mine: '/assets/map/marker-mine.png',
+  forest: '/assets/map/marker-forest.png',
+};
+
+const layerButtons: Array<{ id: MapLayerKey; label: string; icon: string }> = [
+  { id: 'regions', label: 'Регионы', icon: '/assets/map/layer-regions.png' },
+  { id: 'holdings', label: 'Владения', icon: '/assets/map/layer-cities.png' },
+  { id: 'borders', label: 'Границы', icon: '/assets/map/world-map-borders.png' },
+  { id: 'labels', label: 'Названия', icon: '/assets/map/world-map-labels.png' },
+];
+
+function toMapPoint(point: [number, number], height: number) {
+  return [point[0], height - point[1]];
+}
+
+function hexToRgba(hex: string, alpha: number) {
+  const normalized = hex.replace('#', '');
+  const value = Number.parseInt(normalized, 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+export function WorldMap({
+  mapState = defaultMap,
+  kingdoms,
+  regions,
+  holdings,
+  selectedKingdomId,
+  selectedRegionId,
+  selectedHoldingId,
+  onSelectKingdom,
+  onSelectRegion,
+  onOpenHolding,
+}: WorldMapProps) {
   const mapEl = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
-  const countriesRef = useRef<Country[]>(countries);
-  const selectedCountryRef = useRef<string | undefined>(selectedCountryId);
-  const selectedCastleRef = useRef<string | undefined>(selectedCastleId);
-  const [sourceLabel, setSourceLabel] = useState('fallback GeoJSON');
+  const regionSourceRef = useRef<VectorSource<Feature<Geometry>> | null>(null);
+  const holdingSourceRef = useRef<VectorSource<Feature<Geometry>> | null>(null);
+  const layerRefs = useRef<Partial<Record<MapLayerKey, { setVisible: (visible: boolean) => void; changed?: () => void }>>>({});
+  const handlersRef = useRef({ onSelectKingdom, onSelectRegion, onOpenHolding });
+  const dataRef = useRef({ kingdoms, regions, holdings, selectedKingdomId, selectedRegionId, selectedHoldingId, mapState });
+  const [layers, setLayers] = useState<Record<MapLayerKey, boolean>>({
+    regions: true,
+    holdings: true,
+    borders: true,
+    labels: true,
+  });
 
   useEffect(() => {
-    countriesRef.current = countries;
-    selectedCountryRef.current = selectedCountryId;
-    selectedCastleRef.current = selectedCastleId;
+    handlersRef.current = { onSelectKingdom, onSelectRegion, onOpenHolding };
+  }, [onOpenHolding, onSelectKingdom, onSelectRegion]);
+
+  useEffect(() => {
+    dataRef.current = { kingdoms, regions, holdings, selectedKingdomId, selectedRegionId, selectedHoldingId, mapState };
     mapRef.current?.getLayers().forEach((layer) => layer.changed());
-  }, [countries, selectedCastleId, selectedCountryId]);
+  }, [holdings, kingdoms, mapState, regions, selectedHoldingId, selectedKingdomId, selectedRegionId]);
 
   useEffect(() => {
-    if (!mapEl.current || mapRef.current) {
+    Object.entries(layers).forEach(([key, visible]) => {
+      layerRefs.current[key as MapLayerKey]?.setVisible(visible);
+    });
+  }, [layers]);
+
+  useEffect(() => {
+    const target = mapEl.current;
+    if (!target || mapRef.current) {
       return;
     }
 
-    const countrySource = new VectorSource<Feature<Geometry>>();
-    const castleSource = new VectorSource<Feature<Geometry>>();
+    const extent: [number, number, number, number] = [0, 0, mapState.width, mapState.height];
+    const projection = new Projection({
+      code: 'MF-GAME-MAP',
+      units: 'pixels',
+      extent,
+    });
 
-    const countryLayer = new VectorLayer({
-      source: countrySource,
+    const baseLayer = new ImageLayer({
+      source: new Static({
+        url: mapState.image,
+        projection,
+        imageExtent: extent,
+      }),
+    });
+
+    const bordersLayer = new ImageLayer({
+      source: new Static({
+        url: mapState.borders,
+        projection,
+        imageExtent: extent,
+      }),
+      opacity: 0.9,
+    });
+
+    const labelsLayer = new ImageLayer({
+      source: new Static({
+        url: mapState.labels,
+        projection,
+        imageExtent: extent,
+      }),
+      opacity: 0.95,
+    });
+
+    const regionSource = new VectorSource<Feature<Geometry>>();
+    const holdingSource = new VectorSource<Feature<Geometry>>();
+    regionSourceRef.current = regionSource;
+    holdingSourceRef.current = holdingSource;
+
+    const regionLayer = new VectorLayer({
+      source: regionSource,
       style: (feature) => {
-        const countryId = feature.get('countryId') as string;
-        const country = countriesRef.current.find((item) => item.id === countryId);
-        const countryIndex = Math.max(0, countriesRef.current.findIndex((item) => item.id === countryId));
-        const isSelected = selectedCountryRef.current === countryId;
+        const regionId = feature.get('regionId') as string;
+        const kingdomId = feature.get('kingdomId') as string;
+        const selected = dataRef.current.selectedRegionId === regionId;
+        const kingdomSelected = dataRef.current.selectedKingdomId === kingdomId;
+        const kingdom = dataRef.current.kingdoms.find((item) => item.id === kingdomId);
+        const color = kingdom?.color ?? '#d7b46a';
 
         return new Style({
-          fill: new Fill({ color: `${country?.color ?? countryFallbackColors[countryIndex % countryFallbackColors.length]}${isSelected ? 'dd' : '99'}` }),
-          stroke: new Stroke({ color: isSelected ? '#f6d365' : '#1b2638', width: isSelected ? 3 : 1.5 }),
-          text: new Text({
-            text: feature.get('name') ?? '',
-            fill: new Fill({ color: '#f5efe3' }),
-            stroke: new Stroke({ color: '#111827', width: 4 }),
-            font: '600 13px Inter, system-ui, sans-serif',
+          fill: new Fill({
+            color: selected ? hexToRgba(color, 0.42) : kingdomSelected ? hexToRgba(color, 0.24) : hexToRgba(color, 0.08),
+          }),
+          stroke: new Stroke({
+            color: selected ? '#ffd77a' : kingdomSelected ? '#d8ad5f' : 'rgba(255, 232, 170, 0.22)',
+            width: selected ? 3 : kingdomSelected ? 2 : 1,
           }),
         });
       },
     });
 
-    const castleLayer = new VectorLayer({
-      source: castleSource,
+    const holdingLayer = new VectorLayer({
+      source: holdingSource,
       style: (feature) => {
-        const castleId = feature.get('castleId') as string;
-        const countryId = feature.get('countryId') as string;
-        const isSelectedCastle = selectedCastleRef.current === castleId;
-        const isSelectedCountry = selectedCountryRef.current === countryId;
+        const holdingId = feature.get('holdingId') as string;
+        const kind = feature.get('holdingKind') as Holding['kind'];
+        const selected = dataRef.current.selectedHoldingId === holdingId;
 
-        return new Style({
-          image: new CircleStyle({
-            radius: isSelectedCastle ? 11 : 8,
-            fill: new Fill({ color: isSelectedCountry ? '#f6d365' : '#f5efe3' }),
-            stroke: new Stroke({ color: '#171923', width: isSelectedCastle ? 4 : 2 }),
+        return [
+          new Style({
+            image: new Icon({
+              src: selected ? '/assets/map/marker-selected.png' : markerByKind[kind],
+              anchor: [0.5, 0.82],
+              scale: selected ? 0.052 : 0.04,
+            }),
           }),
-          text: new Text({
-            text: feature.get('name') ?? '',
-            offsetY: -20,
-            fill: new Fill({ color: '#f5efe3' }),
-            stroke: new Stroke({ color: '#111827', width: 4 }),
-            font: '600 12px Inter, system-ui, sans-serif',
+          new Style({
+            image: new Icon({
+              src: markerByKind[kind],
+              anchor: [0.5, 0.82],
+              scale: selected ? 0.045 : 0.035,
+            }),
+            text: new Text({
+              text: feature.get('name') ?? '',
+              offsetY: 24,
+              font: selected ? '700 13px Inter, system-ui, sans-serif' : '600 11px Inter, system-ui, sans-serif',
+              fill: new Fill({ color: '#f8eed7' }),
+              stroke: new Stroke({ color: 'rgba(4, 7, 13, 0.9)', width: 4 }),
+            }),
           }),
-        });
+        ];
       },
     });
-
-    const layers = [];
-
-    if (mapSources.wmsUrl && mapSources.wmsLayer) {
-      layers.push(
-        new TileLayer({
-          source: new TileWMS({
-            url: mapSources.wmsUrl,
-            params: {
-              LAYERS: mapSources.wmsLayer,
-              TILED: true,
-            },
-            serverType: 'geoserver',
-          }),
-        }),
-      );
-      setSourceLabel('external GeoServer WMS/WFS');
-    } else {
-      setSourceLabel(isGeoServerConfigured ? 'external GeoServer WFS' : 'fallback GeoJSON');
-    }
-
-    layers.push(countryLayer, castleLayer);
 
     const map = new Map({
-      target: mapEl.current,
-      layers,
+      target,
+      layers: [baseLayer, regionLayer, bordersLayer, holdingLayer, labelsLayer],
       view: new View({
-        center: fromLonLat([5, 0]),
-        zoom: 4.3,
-        minZoom: 3,
-        maxZoom: 8,
+        projection,
+        center: getCenter(extent),
+        zoom: 0,
+        minZoom: -0.35,
+        maxZoom: 2.2,
+        extent,
       }),
       controls: [],
     });
+
+    layerRefs.current = {
+      regions: regionLayer,
+      holdings: holdingLayer,
+      borders: bordersLayer,
+      labels: labelsLayer,
+    };
 
     map.on('singleclick', (event) => {
       let handled = false;
@@ -133,15 +234,17 @@ export function WorldMap({ countries, selectedCountryId, selectedCastleId, onSel
       map.forEachFeatureAtPixel(event.pixel, (feature) => {
         const kind = feature.get('kind');
 
-        if (kind === 'castle') {
-          onSelectCountry(feature.get('countryId'));
-          onOpenCastle(feature.get('castleId'));
+        if (kind === 'holding') {
+          handlersRef.current.onSelectKingdom(feature.get('kingdomId'));
+          handlersRef.current.onSelectRegion(feature.get('regionId'));
+          handlersRef.current.onOpenHolding(feature.get('holdingId'));
           handled = true;
           return true;
         }
 
-        if (kind === 'country') {
-          onSelectCountry(feature.get('countryId'));
+        if (kind === 'region') {
+          handlersRef.current.onSelectKingdom(feature.get('kingdomId'));
+          handlersRef.current.onSelectRegion(feature.get('regionId'));
           handled = true;
           return true;
         }
@@ -149,47 +252,87 @@ export function WorldMap({ countries, selectedCountryId, selectedCastleId, onSel
         return false;
       });
 
-      if (!handled) {
-        return;
-      }
+      return handled;
     });
-
-    async function loadLayer(url: string, source: VectorSource<Feature<Geometry>>) {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Не удалось загрузить слой: ${url}`);
-      }
-
-      const data = await response.json();
-      const features = new GeoJSON().readFeatures(data, {
-        dataProjection: 'EPSG:4326',
-        featureProjection: map.getView().getProjection(),
-      });
-      source.clear();
-      source.addFeatures(features as Feature<Geometry>[]);
-    }
-
-    loadLayer(mapSources.countriesUrl, countrySource).catch((error) => console.error(error));
-    loadLayer(mapSources.castlesUrl, castleSource).catch((error) => console.error(error));
 
     mapRef.current = map;
 
     return () => {
       map.setTarget(undefined);
       mapRef.current = null;
+      regionSourceRef.current = null;
+      holdingSourceRef.current = null;
     };
-  }, [onOpenCastle, onSelectCountry]);
+  }, [mapState.borders, mapState.height, mapState.image, mapState.labels, mapState.width]);
+
+  useEffect(() => {
+    const regionSource = regionSourceRef.current;
+    const holdingSource = holdingSourceRef.current;
+    if (!regionSource || !holdingSource) {
+      return;
+    }
+
+    regionSource.clear();
+    holdingSource.clear();
+
+    const regionFeatures = regions.map((region) => {
+      const feature = new Feature({
+        geometry: new Polygon([region.mapPolygon.map((point) => toMapPoint(point, mapState.height))]),
+      });
+      feature.setProperties({
+        kind: 'region',
+        regionId: region.id,
+        kingdomId: region.kingdomId,
+        name: region.name,
+      });
+      return feature;
+    });
+
+    const holdingFeatures = holdings.map((holding) => {
+      const feature = new Feature({
+        geometry: new Point(toMapPoint(holding.mapPoint, mapState.height)),
+      });
+      feature.setProperties({
+        kind: 'holding',
+        holdingKind: holding.kind,
+        holdingId: holding.id,
+        regionId: holding.regionId,
+        kingdomId: holding.kingdomId,
+        name: holding.name,
+      });
+      return feature;
+    });
+
+    regionSource.addFeatures(regionFeatures);
+    holdingSource.addFeatures(holdingFeatures);
+  }, [holdings, mapState.height, regions]);
 
   return (
-    <section className="map-shell">
-      <div className="map-header">
-        <div>
-          <strong>Глобальная карта</strong>
-          <span>Выбери страну или открой замок</span>
+    <section className="world-map-shell">
+      <div className="map-toolbar">
+        <div className="map-toolbar-title">
+          <img src="/assets/ui/icon-map.png" alt="" />
+          <div>
+            <strong>Карта королевств</strong>
+            <span>Регионы, владения, границы и стратегические слои</span>
+          </div>
         </div>
-        <div className="source-pill">Источник: {sourceLabel}</div>
+
+        <div className="map-layer-buttons">
+          {layerButtons.map((layer) => (
+            <button
+              className={layers[layer.id] ? 'icon-toggle icon-toggle-active' : 'icon-toggle'}
+              key={layer.id}
+              onClick={() => setLayers((current) => ({ ...current, [layer.id]: !current[layer.id] }))}
+              title={layer.label}
+            >
+              <img src={layer.icon} alt="" />
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="map" ref={mapEl} />
+
+      <div className="map-stage" ref={mapEl} />
     </section>
   );
 }

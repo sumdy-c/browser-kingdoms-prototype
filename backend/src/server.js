@@ -2,7 +2,15 @@ import http from 'node:http';
 import cors from 'cors';
 import express from 'express';
 import { Server } from 'socket.io';
-import { advanceWorld, buildInCastle, createInitialWorld, getPublicSnapshot, selectCountry } from './world.js';
+import {
+  advanceWorld,
+  buildInCastle,
+  createInitialWorld,
+  dispatchWorldAction,
+  getPublicSnapshot,
+  selectKingdom,
+  setPlayerMode,
+} from './world.js';
 
 const port = Number(process.env.PORT ?? 3001);
 const clientOrigin = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
@@ -22,6 +30,10 @@ const io = new Server(server, {
 
 const world = createInitialWorld(tickMs);
 
+function emitWorldState(target = io) {
+  target.emit('world:state', getPublicSnapshot(world));
+}
+
 app.get('/health', (_req, res) => {
   res.json({
     ok: true,
@@ -37,30 +49,67 @@ app.get('/state', (_req, res) => {
 });
 
 io.on('connection', (socket) => {
-  socket.emit('world:state', getPublicSnapshot(world));
+  emitWorldState(socket);
 
   socket.on('player:join', (profile) => {
     world.players.set(socket.id, {
       id: profile?.id ?? socket.id,
       nickname: profile?.nickname ?? `Gamer${Math.floor(1000 + Math.random() * 8999)}`,
-      role: profile?.role ?? 'king',
-      selectedCountryId: profile?.selectedCountryId,
+      role: profile?.role ?? 'ruler',
+      mode: profile?.mode === 'admin' ? 'admin' : 'player',
+      selectedKingdomId: profile?.selectedKingdomId ?? profile?.selectedCountryId,
+      selectedCountryId: profile?.selectedKingdomId ?? profile?.selectedCountryId,
     });
 
-    socket.emit('world:state', getPublicSnapshot(world));
+    emitWorldState(socket);
     io.emit('world:presence', { onlinePlayers: world.players.size });
   });
 
   socket.on('country:select', (payload) => {
-    const ok = selectCountry(world, socket.id, payload?.countryId);
+    const ok = selectKingdom(world, socket.id, payload?.countryId ?? payload?.kingdomId);
 
     if (!ok) {
       socket.emit('country:rejected', { reason: 'Не удалось выбрать страну.' });
       return;
     }
 
-    socket.emit('player:countrySelected', { countryId: payload.countryId });
-    socket.emit('world:state', getPublicSnapshot(world));
+    const kingdomId = payload.countryId ?? payload.kingdomId;
+    socket.emit('player:countrySelected', { countryId: kingdomId, kingdomId });
+    emitWorldState(socket);
+  });
+
+  socket.on('kingdom:select', (payload) => {
+    const ok = selectKingdom(world, socket.id, payload?.kingdomId);
+
+    if (!ok) {
+      socket.emit('action:rejected', { reason: 'Не удалось выбрать державу.' });
+      return;
+    }
+
+    socket.emit('player:countrySelected', { countryId: payload.kingdomId, kingdomId: payload.kingdomId });
+    emitWorldState(socket);
+  });
+
+  socket.on('player:setMode', (payload) => {
+    const ok = setPlayerMode(world, socket.id, payload?.mode);
+
+    if (!ok) {
+      socket.emit('action:rejected', { reason: 'Не удалось сменить режим игрока.' });
+      return;
+    }
+
+    emitWorldState(socket);
+  });
+
+  socket.on('world:action', (action) => {
+    const result = dispatchWorldAction(world, socket.id, action ?? {});
+
+    if (!result.ok) {
+      socket.emit('action:rejected', { reason: result.reason });
+      return;
+    }
+
+    io.emit('world:state', getPublicSnapshot(world));
   });
 
   socket.on('castle:build', (payload) => {

@@ -1,18 +1,24 @@
-# MF.Game — Browser Kingdoms Prototype
+# MF.Game — Browser Kingdoms MVP
 
-Pre-MVP браузерной grand strategy / CK-like игры:
+Single-player MVP браузерной grand strategy / kingdom survival игры.
+
+Вдохновение: Crusader Kings 3 по ощущению карты, регионов, законов и дипломатии; Stronghold Kingdoms по экономике, строительству, рынку и отправке ресурсов. Династий и полноценного мультиплеера пока нет, но backend уже держит авторитетное состояние мира и принимает действия через Socket.IO, чтобы позже добавить аккаунты, блокировки держав, рынок между игроками и дипломатические сделки.
+
+## Текущий MVP
 
 - React + TypeScript + Vite frontend
-- OpenLayers глобальная карта
-- Babylon.js сцена замка
 - Node.js + Express + Socket.IO backend
-- server-side real-time tick
-- псевдо-авторизация игрока
-- выбор страны
-- экономика страны
-- события
-- строительство домиков/ферм/складов/казарм/башен в 3D-замке
-- GeoServer подключается как внешний ожидаемый сервис через env, но есть fallback GeoJSON
+- painted global map из `public/assets/map/`
+- 8 канонических держав: Riverland, Nordgard, Caldoria, Velund, Solaria, Dragonridge, Morven, Frostheim
+- CK-like регионы и владения внутри держав
+- server-side tick, пауза и скорости 1/2/3
+- экономика: золото, еда, дерево, камень, железо, влияние, технологии, население, армия, стабильность, процветание, угроза
+- строительство во владениях и Babylon.js castle view
+- AI-соседи: строят, набирают войска, иногда рейдят
+- рынок: покупка/продажа ресурсов
+- дипломатия: отношения, посольство, отправка караванов
+- простая военная команда: набор войск и рейд с быстрым результатом
+- временный режим `Player/Admin` в интерфейсе
 
 ## Запуск
 
@@ -25,45 +31,40 @@ docker compose up --build
 - frontend: http://localhost:5173
 - backend health: http://localhost:3001/health
 
-## GeoServer
+Если запускаешь без Docker, нужны Node.js и npm в `backend/` и `frontend/`.
 
-В первом pre-MVP GeoServer **не поднимается** внутри `docker-compose.yml`.
-Клиент уже подготовлен к внешнему GeoServer через переменные окружения:
+## Карта и ассеты
 
-```env
-VITE_GEOSERVER_WFS_COUNTRIES_URL=
-VITE_GEOSERVER_WFS_CASTLES_URL=
-VITE_GEOSERVER_WMS_URL=
-VITE_GEOSERVER_WMS_LAYER=
-```
-
-Пока они пустые, OpenLayers грузит локальные файлы:
+GeoServer больше не нужен для MVP. Основная карта и слои берутся из:
 
 ```text
-frontend/public/data/world.geojson
-frontend/public/data/castles.geojson
+frontend/public/assets/map/world-map-painted.png
+frontend/public/assets/map/world-map-borders.png
+frontend/public/assets/map/world-map-labels.png
+frontend/public/assets/map/world-map-minimap.png
+frontend/public/assets/map/marker-*.png
 ```
 
-Позже можно поднять GeoServer отдельно и подать WFS/WMS URL без переписывания карты.
+Остальные игровые изображения лежат в:
 
-## Игровая логика
+```text
+frontend/public/assets/backgrounds/
+frontend/public/assets/branding/
+frontend/public/assets/buildings/
+frontend/public/assets/events/
+frontend/public/assets/kingdoms/
+frontend/public/assets/resources/
+frontend/public/assets/ui/
+```
 
-Сервер каждые 5 секунд двигает игровой день:
+README внутри папок ассетов оставлены как чеклисты и арт-дирекшен.
 
-- пересчитывает ресурсы стран;
-- учитывает построенные здания;
-- иногда создаёт случайные события;
-- отправляет обновлённое состояние через Socket.IO.
+## Что ещё не включено
 
-Состояние хранится только в памяти. После перезапуска Docker мир сбрасывается.
-
-## Что специально не включено в pre-MVP
-
-- настоящая регистрация;
-- реальный мультиплеер с блокировкой стран;
-- боты;
-- PostGIS;
-- встроенный GeoServer;
-- сохранение мира после рестарта;
-- боёвка;
-- WebGPU renderer.
+- регистрация и аккаунты
+- сохранение мира после перезапуска
+- настоящий рынок между игроками
+- полноценная война с армиями на карте
+- права владения/слоты для мультиплеера
+- Postgres/PostGIS
+- lang-паки

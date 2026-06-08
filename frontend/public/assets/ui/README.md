@@ -17,6 +17,7 @@ Navigation/action icons, transparent PNG, recommended 96x96:
 - `icon-speed-1.png`
 - `icon-speed-2.png`
 - `icon-speed-3.png`
+
 - `icon-diplomacy.png`
 - `icon-economy.png`
 - `icon-army.png`
@@ -27,6 +28,7 @@ Navigation/action icons, transparent PNG, recommended 96x96:
 - `icon-laws.png`
 - `icon-summary.png`
 - `icon-filter.png`
+
 - `icon-dropdown.png`
 - `icon-back.png`
 - `icon-forward.png`

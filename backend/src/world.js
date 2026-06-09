@@ -102,6 +102,119 @@ export const buildingCatalog = {
 
 const marketResources = ['food', 'wood', 'stone', 'iron'];
 
+export const technologyTree = [
+  {
+    id: 'crop_rotation',
+    name: 'Севооборот',
+    branch: 'economy',
+    tier: 1,
+    baseDays: 8,
+    cost: { gold: 40, influence: 4 },
+    requires: [],
+    description: 'Полевые книги и смена культур поднимают урожайность во всех землях.',
+    effects: { foodYield: 0.08, prosperityDaily: 0.02 },
+  },
+  {
+    id: 'ledger_houses',
+    name: 'Счётные палаты',
+    branch: 'economy',
+    tier: 1,
+    baseDays: 9,
+    cost: { gold: 60, influence: 8 },
+    requires: [],
+    description: 'Единая отчётность снижает утечки казны и усиливает налоговую базу.',
+    effects: { goldYield: 0.06, stabilityDaily: 0.02 },
+  },
+  {
+    id: 'chartered_markets',
+    name: 'Рыночные хартии',
+    branch: 'trade',
+    tier: 2,
+    baseDays: 13,
+    cost: { gold: 90, influence: 14, technology: 10 },
+    requires: ['ledger_houses'],
+    description: 'Купцы получают гарантии короны, торговые маршруты становятся прибыльнее.',
+    effects: { tradeIncome: 0.18, marketDiscount: 0.04 },
+  },
+  {
+    id: 'stone_roads',
+    name: 'Каменные дороги',
+    branch: 'trade',
+    tier: 2,
+    baseDays: 12,
+    cost: { gold: 75, stone: 90, wood: 35 },
+    requires: ['crop_rotation'],
+    description: 'Дороги связывают владения, ускоряя караваны, контроль и снабжение.',
+    effects: { marketDiscount: 0.08, controlDaily: 0.03, tradeIncome: 0.08 },
+  },
+  {
+    id: 'standing_watch',
+    name: 'Постоянная стража',
+    branch: 'military',
+    tier: 1,
+    baseDays: 9,
+    cost: { gold: 55, iron: 14 },
+    requires: [],
+    description: 'Регулярная стража держит дороги и снижает внутреннюю угрозу.',
+    effects: { threatDaily: -0.08, moraleDaily: 0.03 },
+  },
+  {
+    id: 'siegecraft',
+    name: 'Осадное ремесло',
+    branch: 'military',
+    tier: 2,
+    baseDays: 14,
+    cost: { gold: 90, wood: 90, iron: 28, technology: 12 },
+    requires: ['standing_watch'],
+    description: 'Инженеры и обозы дают преимущество в долгих войнах.',
+    effects: { warAttack: 0.13, enemyFortBypass: 0.12 },
+  },
+  {
+    id: 'fortified_baileys',
+    name: 'Укреплённые бейли',
+    branch: 'military',
+    tier: 2,
+    baseDays: 13,
+    cost: { stone: 115, wood: 65, gold: 70 },
+    requires: ['standing_watch'],
+    description: 'Новые дворы и палисады удешевляют укрепления и снижают потери.',
+    effects: { warDefense: 0.13, fortifyDiscount: 0.12 },
+  },
+  {
+    id: 'court_protocol',
+    name: 'Дворцовый протокол',
+    branch: 'diplomacy',
+    tier: 1,
+    baseDays: 8,
+    cost: { influence: 16, gold: 35 },
+    requires: [],
+    description: 'Канцелярия отвечает быстрее, послы обходятся дешевле.',
+    effects: { treatyDiscount: 0.1, diplomacyWeight: 5 },
+  },
+  {
+    id: 'envoy_network',
+    name: 'Сеть послов',
+    branch: 'diplomacy',
+    tier: 2,
+    baseDays: 12,
+    cost: { influence: 26, gold: 80, technology: 8 },
+    requires: ['court_protocol'],
+    description: 'Постоянные представители медленно прогревают отношения с соседями.',
+    effects: { treatyDiscount: 0.08, relationDrift: 0.04, diplomacyWeight: 8 },
+  },
+  {
+    id: 'vassal_codes',
+    name: 'Кодекс вассалитета',
+    branch: 'diplomacy',
+    tier: 3,
+    baseDays: 18,
+    cost: { influence: 42, gold: 130, technology: 28 },
+    requires: ['envoy_network', 'fortified_baileys'],
+    description: 'Единый закон вассалов повышает дань и облегчает добровольное подчинение.',
+    effects: { vassalTribute: 0.12, diplomacyWeight: 12, stabilityDaily: 0.03 },
+  },
+];
+
 const kingdomSeeds = [
   {
     id: 'riverland',
@@ -335,6 +448,13 @@ export function createInitialWorld(tickMs) {
     armies,
     market: createMarket(),
     diplomacy: createDiplomacy(kingdoms),
+    technology: createTechnologyState(kingdoms),
+    wars: [],
+    victory: {
+      objective: 'vassalize_all',
+      completed: false,
+      winnerKingdomId: null,
+    },
     events: [
       createEvent(1, 'scroll', 'The Island Wakes', 'Eight crowns watch the same horizon. No victory is promised, only survival.', undefined, 'world'),
     ],
@@ -358,6 +478,8 @@ function createKingdom(seed) {
     aiFocus: seed.aiFocus,
     capitalRegionId: seed.capitalRegionId,
     baseBuildLimit: seed.resources.buildLimit,
+    overlordId: null,
+    vassals: [],
     resources: { ...seed.resources },
     policies: {
       taxation: 'balanced',
@@ -497,6 +619,23 @@ function createMarket() {
     },
     open: true,
     volume: 0,
+    routes: [],
+  };
+}
+
+function createTechnologyState(kingdoms) {
+  const completed = {};
+  const active = {};
+
+  for (const kingdom of kingdoms) {
+    completed[kingdom.id] = [];
+    active[kingdom.id] = null;
+  }
+
+  return {
+    tree: technologyTree,
+    completed,
+    active,
   };
 }
 
@@ -524,6 +663,7 @@ function createDiplomacy(kingdoms) {
   return {
     relations,
     treaties: [],
+    vassals: {},
   };
 }
 
@@ -539,6 +679,9 @@ export function getPublicSnapshot(world) {
     armies: world.armies,
     market: world.market,
     diplomacy: world.diplomacy,
+    technology: world.technology,
+    wars: world.wars,
+    victory: world.victory,
     events: world.events,
     buildingCatalog,
     onlinePlayers: world.players.size,
@@ -596,6 +739,10 @@ export function dispatchWorldAction(world, socketId, action = {}) {
     return tradeMarket(world, socketId, payload);
   }
 
+  if (type === 'market:createRoute') {
+    return createTradeRoute(world, socketId, payload);
+  }
+
   if (type === 'diplomacy:sendResources') {
     return sendResources(world, socketId, payload);
   }
@@ -606,6 +753,14 @@ export function dispatchWorldAction(world, socketId, action = {}) {
 
   if (type === 'diplomacy:proposeTreaty') {
     return proposeTreaty(world, socketId, payload);
+  }
+
+  if (type === 'diplomacy:demandVassalage') {
+    return demandVassalage(world, socketId, payload);
+  }
+
+  if (type === 'war:declare') {
+    return declareWar(world, socketId, payload);
   }
 
   if (type === 'army:recruit') {
@@ -634,6 +789,10 @@ export function dispatchWorldAction(world, socketId, action = {}) {
 
   if (type === 'technology:fundResearch') {
     return fundResearch(world, socketId, payload);
+  }
+
+  if (type === 'technology:startResearch') {
+    return startResearch(world, socketId, payload);
   }
 
   if (type === 'policy:set') {
@@ -729,27 +888,93 @@ function tradeMarket(world, socketId, payload) {
   }
 
   const price = world.market.prices[resource];
-  const gold = Math.ceil(price * amount);
+  const effects = getTechEffects(world, kingdom);
+  const buyGold = Math.ceil(price * amount * (1 - Math.min(0.32, effects.marketDiscount)));
+  const sellGold = Math.floor(price * amount * (0.82 + Math.min(0.2, effects.tradeIncome * 0.35)));
 
   if (direction === 'buy') {
-    if (kingdom.resources.gold < gold) {
+    if (kingdom.resources.gold < buyGold) {
       return { ok: false, reason: 'Недостаточно золота для сделки.' };
     }
-    kingdom.resources.gold -= gold;
+    kingdom.resources.gold -= buyGold;
     kingdom.resources[resource] += amount;
     world.market.trend[resource] += 1;
-    pushEvent(world, 'trade', 'Рыночная закупка', `${kingdom.name} закупает ${resource}: +${amount}, золото -${gold}.`, kingdom.id, { [resource]: amount, gold: -gold });
+    pushEvent(world, 'trade', 'Рыночная закупка', `${kingdom.name} закупает ${resource}: +${amount}, золото -${buyGold}.`, kingdom.id, { [resource]: amount, gold: -buyGold });
   } else {
     if (kingdom.resources[resource] < amount) {
       return { ok: false, reason: 'Недостаточно ресурса для продажи.' };
     }
     kingdom.resources[resource] -= amount;
-    kingdom.resources.gold += Math.floor(gold * 0.82);
+    kingdom.resources.gold += sellGold;
     world.market.trend[resource] -= 1;
-    pushEvent(world, 'trade', 'Рыночная продажа', `${kingdom.name} продаёт ${resource}: -${amount}, золото +${Math.floor(gold * 0.82)}.`, kingdom.id);
+    pushEvent(world, 'trade', 'Рыночная продажа', `${kingdom.name} продаёт ${resource}: -${amount}, золото +${sellGold}.`, kingdom.id);
   }
 
   world.market.volume += amount;
+  return { ok: true };
+}
+
+function createTradeRoute(world, socketId, payload) {
+  const from = getActionKingdom(world, socketId, payload.kingdomId ?? payload.fromKingdomId);
+  const to = world.kingdoms.find((item) => item.id === payload.partnerKingdomId || item.id === payload.toKingdomId);
+  const resource = payload.resource;
+  const direction = payload.direction === 'export' ? 'export' : 'import';
+  const amount = clampNumber(Number(payload.amount ?? 18), 6, 45);
+
+  if (!from || !to || from.id === to.id) {
+    return { ok: false, reason: 'Неверный торговый партнёр.' };
+  }
+
+  if (!marketResources.includes(resource)) {
+    return { ok: false, reason: 'Этот ресурс нельзя пустить по маршруту.' };
+  }
+
+  if (isAtWar(world, from.id, to.id)) {
+    return { ok: false, reason: 'Во время войны торговые маршруты закрыты.' };
+  }
+
+  const relation = world.diplomacy.relations[from.id]?.[to.id] ?? 45;
+  const hasTrade = hasDiplomaticTreaty(world, from.id, to.id, 'trade');
+  if (relation < 42 && !hasTrade) {
+    return { ok: false, reason: 'Отношения слишком слабые для стабильного маршрута.' };
+  }
+
+  const duplicate = (world.market.routes ?? []).some((route) => (
+    route.status !== 'expired'
+    && route.fromKingdomId === from.id
+    && route.toKingdomId === to.id
+    && route.resource === resource
+    && route.direction === direction
+  ));
+  if (duplicate) {
+    return { ok: false, reason: 'Такой торговый маршрут уже действует.' };
+  }
+
+  const cost = hasTrade
+    ? { gold: 24, influence: 4 }
+    : { gold: 42, influence: 8 };
+  if (!canAfford(from.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно ресурсов для открытия маршрута.' };
+  }
+
+  payCost(from.resources, cost);
+  world.market.routes ??= [];
+  world.market.routes.push({
+    id: `route-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fromKingdomId: from.id,
+    toKingdomId: to.id,
+    resource,
+    direction,
+    amount,
+    startedDay: world.time.day,
+    startedYear: world.time.year,
+    remainingDays: hasTrade ? 62 : 45,
+    status: 'active',
+    volume: 0,
+    pausedDays: 0,
+  });
+  adjustRelation(world, from.id, to.id, 2);
+  pushEvent(world, 'trade', 'Торговый маршрут открыт', `${from.name} открывает ${direction === 'export' ? 'экспорт' : 'импорт'} ${resource} с ${to.name}.`, from.id, { gold: -cost.gold, influence: -cost.influence });
   return { ok: true };
 }
 
@@ -786,38 +1011,49 @@ function improveRelations(world, socketId, payload) {
     return { ok: false, reason: 'Неверная дипломатическая цель.' };
   }
 
-  if (from.resources.influence < 12) {
+  const cost = Math.ceil(12 * (1 - Math.min(0.3, getTechEffects(world, from).treatyDiscount)));
+  if (from.resources.influence < cost) {
     return { ok: false, reason: 'Недостаточно влияния.' };
   }
 
-  from.resources.influence -= 12;
-  adjustRelation(world, from.id, to.id, 8);
-  pushEvent(world, 'diplomacy', 'Посольство принято', `${from.name} улучшает отношения с ${to.name}.`, from.id, { influence: -12 });
+  from.resources.influence -= cost;
+  adjustRelation(world, from.id, to.id, 8 + Math.floor(getTechEffects(world, from).diplomacyWeight / 8));
+  pushEvent(world, 'diplomacy', 'Посольство принято', `${from.name} улучшает отношения с ${to.name}.`, from.id, { influence: -cost });
   return { ok: true };
 }
 
 function proposeTreaty(world, socketId, payload) {
   const from = getActionKingdom(world, socketId, payload.fromKingdomId);
   const to = world.kingdoms.find((item) => item.id === payload.toKingdomId);
-  const treatyType = ['trade', 'non_aggression', 'research'].includes(payload.treatyType) ? payload.treatyType : 'trade';
+  const treatyType = ['trade', 'non_aggression', 'research', 'alliance', 'tribute'].includes(payload.treatyType) ? payload.treatyType : 'trade';
   const treatyLabels = {
+    alliance: 'оборонительный союз',
     trade: 'торговое соглашение',
     non_aggression: 'пакт о ненападении',
     research: 'обмен учёными',
+    tribute: 'договор о пошлинах',
   };
   const relationNeeded = {
+    alliance: 78,
     trade: 55,
     non_aggression: 48,
     research: 64,
+    tribute: 62,
   };
-  const cost = {
+  const baseCost = {
+    alliance: { influence: 34, gold: 90, iron: 14 },
     trade: { influence: 16, gold: 40 },
     non_aggression: { influence: 18, gold: 30 },
     research: { influence: 22, gold: 55, technology: 12 },
+    tribute: { influence: 24, gold: 70 },
   }[treatyType];
 
   if (!from || !to || from.id === to.id) {
     return { ok: false, reason: 'Неверный адресат договора.' };
+  }
+
+  if (isAtWar(world, from.id, to.id)) {
+    return { ok: false, reason: 'Сначала нужно завершить войну.' };
   }
 
   const relation = world.diplomacy.relations[from.id]?.[to.id] ?? 45;
@@ -834,6 +1070,8 @@ function proposeTreaty(world, socketId, payload) {
     return { ok: false, reason: 'Такой договор уже действует.' };
   }
 
+  const discount = Math.min(0.35, getTechEffects(world, from).treatyDiscount);
+  const cost = scaleCost(baseCost, 1 - discount);
   if (!canAfford(from.resources, cost)) {
     return { ok: false, reason: 'Недостаточно ресурсов для договора.' };
   }
@@ -846,11 +1084,116 @@ function proposeTreaty(world, socketId, payload) {
     type: treatyType,
     signedDay: world.time.day,
     signedYear: world.time.year,
-    durationDays: 72,
+    durationDays: treatyType === 'alliance' ? 110 : treatyType === 'tribute' ? 88 : 72,
   });
 
-  adjustRelation(world, from.id, to.id, treatyType === 'non_aggression' ? 10 : 7);
+  adjustRelation(world, from.id, to.id, treatyType === 'alliance' ? 14 : treatyType === 'non_aggression' ? 10 : 7);
   pushEvent(world, 'diplomacy', 'Договор заключён', `${from.name} и ${to.name} подписывают ${treatyLabels[treatyType]}.`, from.id, { influence: -cost.influence });
+  return { ok: true };
+}
+
+function demandVassalage(world, socketId, payload) {
+  const from = getActionKingdom(world, socketId, payload.fromKingdomId ?? payload.kingdomId);
+  const to = world.kingdoms.find((item) => item.id === payload.toKingdomId || item.id === payload.targetKingdomId);
+
+  if (!from || !to || from.id === to.id) {
+    return { ok: false, reason: 'Неверная цель вассалитета.' };
+  }
+
+  if (world.diplomacy.vassals?.[to.id] === from.id) {
+    return { ok: false, reason: 'Эта держава уже ваш вассал.' };
+  }
+
+  if (wouldCreateVassalCycle(world, from.id, to.id)) {
+    return { ok: false, reason: 'Такой договор создаст конфликт клятв.' };
+  }
+
+  if (isAtWar(world, from.id, to.id)) {
+    return { ok: false, reason: 'Во время войны вассалитет навязывается победой.' };
+  }
+
+  const relation = world.diplomacy.relations[from.id]?.[to.id] ?? 45;
+  const effects = getTechEffects(world, from);
+  const pressure = relation
+    + (from.resources.army - to.resources.army) / 5
+    + (from.resources.stability - to.resources.stability) / 2
+    + (to.resources.stability < 35 ? 20 : 0)
+    + (to.resources.army < 90 ? 14 : 0)
+    + effects.diplomacyWeight;
+
+  if (pressure < 92) {
+    return { ok: false, reason: 'Держава ещё не готова принять вассальную клятву.' };
+  }
+
+  const cost = scaleCost({ influence: 36, gold: 80 }, 1 - Math.min(0.28, effects.treatyDiscount));
+  if (!canAfford(from.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно золота и влияния для вассальной грамоты.' };
+  }
+
+  payCost(from.resources, cost);
+  vassalizeKingdom(world, from.id, to.id, 'diplomacy');
+  pushEvent(world, 'diplomacy', 'Вассальная клятва', `${to.name} признаёт сюзеренитет ${from.name}.`, from.id, { influence: -cost.influence, gold: -cost.gold });
+  updateVictory(world);
+  return { ok: true };
+}
+
+function declareWar(world, socketId, payload) {
+  const attacker = getActionKingdom(world, socketId, payload.attackerKingdomId ?? payload.kingdomId);
+  const defender = world.kingdoms.find((item) => item.id === payload.defenderKingdomId || item.id === payload.targetKingdomId);
+
+  if (!attacker || !defender || attacker.id === defender.id) {
+    return { ok: false, reason: 'Неверная цель войны.' };
+  }
+
+  if (world.diplomacy.vassals?.[defender.id] === attacker.id) {
+    return { ok: false, reason: 'Нельзя объявить войну собственному вассалу.' };
+  }
+
+  if (world.diplomacy.vassals?.[attacker.id] === defender.id) {
+    return { ok: false, reason: 'Вассал не может объявить войну сюзерену.' };
+  }
+
+  if (isAtWar(world, attacker.id, defender.id)) {
+    return { ok: false, reason: 'Война уже идёт.' };
+  }
+
+  const cost = { gold: 55, influence: 10 };
+  if (!canAfford(attacker.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно ресурсов для мобилизации.' };
+  }
+
+  payCost(attacker.resources, cost);
+  breakTreatiesBetween(world, attacker.id, defender.id);
+  adjustRelation(world, attacker.id, defender.id, -42);
+  attacker.resources.threat = clampNumber(attacker.resources.threat + 8, 0, 100);
+  defender.resources.threat = clampNumber(defender.resources.threat + 6, 0, 100);
+
+  const attackerArmy = world.armies.find((item) => item.kingdomId === attacker.id);
+  const defenderArmy = world.armies.find((item) => item.kingdomId === defender.id);
+  if (attackerArmy) {
+    attackerArmy.status = 'campaigning';
+    attackerArmy.morale = clampNumber(attackerArmy.morale + 2, 20, 100);
+  }
+  if (defenderArmy) {
+    defenderArmy.status = 'defending';
+  }
+
+  world.wars.push({
+    id: `war-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    attackerKingdomId: attacker.id,
+    defenderKingdomId: defender.id,
+    startedDay: world.time.day,
+    startedYear: world.time.year,
+    days: 0,
+    status: 'active',
+    attackerWarScore: 0,
+    defenderWarScore: 0,
+    lastReportDay: world.time.day,
+    winnerKingdomId: null,
+    loserKingdomId: null,
+  });
+
+  pushEvent(world, 'war', 'Война объявлена', `${attacker.name} начинает войну против ${defender.name}. Побеждённый станет вассалом.`, attacker.id, { gold: -cost.gold, influence: -cost.influence });
   return { ok: true };
 }
 
@@ -893,8 +1236,10 @@ function raidRegion(world, socketId, payload) {
 
   const defender = world.kingdoms.find((item) => item.id === region.kingdomId);
   const attackerArmy = world.armies.find((item) => item.kingdomId === attacker.id);
-  const defenderPower = region.fortLevel * 45 + averageHoldingGarrison(world, region.id) + defender.resources.army * 0.35;
-  const attackerPower = attacker.resources.army * (attackerArmy?.morale ?? 70) / 100 + Math.random() * 80;
+  const attackerEffects = getTechEffects(world, attacker);
+  const defenderEffects = getTechEffects(world, defender);
+  const defenderPower = region.fortLevel * 45 * (1 - Math.min(0.45, attackerEffects.enemyFortBypass)) + averageHoldingGarrison(world, region.id) + defender.resources.army * 0.35 * (1 + defenderEffects.warDefense);
+  const attackerPower = attacker.resources.army * (attackerArmy?.morale ?? 70) / 100 * (1 + attackerEffects.warAttack) + Math.random() * 80;
   const success = attackerPower > defenderPower;
 
   const attackerLosses = success ? randomInt(16, 38) : randomInt(34, 72);
@@ -973,7 +1318,7 @@ function fortifyRegion(world, socketId, payload) {
     return { ok: false, reason: 'Этот регион уже максимально укреплён.' };
   }
 
-  const cost = { wood: 45, stone: 55, gold: 35 };
+  const cost = scaleCost({ wood: 45, stone: 55, gold: 35 }, 1 - Math.min(0.35, getTechEffects(world, kingdom).fortifyDiscount));
   if (!canAfford(kingdom.resources, cost)) {
     return { ok: false, reason: 'Недостаточно ресурсов для укреплений.' };
   }
@@ -1056,10 +1401,59 @@ function fundResearch(world, socketId, payload) {
 
   payCost(kingdom.resources, cost);
   const bonus = kingdom.policies.research === 'engineering' ? 28 : kingdom.policies.research === 'military' ? 24 : 22;
-  kingdom.resources.technology = clampResource(kingdom.resources.technology + bonus);
+  ensureTechnologyState(world);
+  const active = world.technology.active[kingdom.id];
+  if (active) {
+    active.progress = clampNumber(active.progress + bonus / 3, 0, active.required);
+    active.power = calculateResearchPower(world, kingdom);
+  } else {
+    kingdom.resources.technology = clampResource(kingdom.resources.technology + bonus);
+  }
   kingdom.resources.prosperity = clampNumber(kingdom.resources.prosperity + 1, 0, 100);
 
-  pushEvent(world, 'research', 'Исследования профинансированы', `${kingdom.name}: мастерские и архивы получают казённые гранты. Технологии +${bonus}.`, kingdom.id, { technology: bonus });
+  pushEvent(world, 'research', 'Исследования профинансированы', active
+    ? `${kingdom.name}: гранты ускоряют текущий проект. Прогресс +${Math.floor(bonus / 3)}.`
+    : `${kingdom.name}: мастерские и архивы получают казённые гранты. Технологии +${bonus}.`, kingdom.id, { technology: active ? 0 : bonus });
+  return { ok: true };
+}
+
+function startResearch(world, socketId, payload) {
+  const kingdom = getActionKingdom(world, socketId, payload.kingdomId);
+  const tech = technologyTree.find((item) => item.id === payload.techId);
+
+  if (!kingdom || !tech) {
+    return { ok: false, reason: 'Исследование недоступно.' };
+  }
+
+  ensureTechnologyState(world);
+  if (world.technology.active[kingdom.id]) {
+    return { ok: false, reason: 'Учёные уже заняты текущим проектом.' };
+  }
+
+  const completed = new Set(world.technology.completed[kingdom.id] ?? []);
+  if (completed.has(tech.id)) {
+    return { ok: false, reason: 'Эта технология уже изучена.' };
+  }
+
+  const missing = tech.requires.filter((requirement) => !completed.has(requirement));
+  if (missing.length) {
+    return { ok: false, reason: 'Не выполнены требования технологии.' };
+  }
+
+  if (!canAfford(kingdom.resources, tech.cost)) {
+    return { ok: false, reason: 'Недостаточно ресурсов для начала исследования.' };
+  }
+
+  payCost(kingdom.resources, tech.cost);
+  world.technology.active[kingdom.id] = {
+    techId: tech.id,
+    progress: 0,
+    required: tech.baseDays,
+    startedDay: world.time.day,
+    startedYear: world.time.year,
+    power: calculateResearchPower(world, kingdom),
+  };
+  pushEvent(world, 'research', 'Исследование начато', `${kingdom.name}: архивы начинают проект "${tech.name}".`, kingdom.id);
   return { ok: true };
 }
 
@@ -1107,12 +1501,18 @@ function advanceOneDay(world) {
 
   world.time.season = getSeason(world.time.day);
   expireDiplomaticTreaties(world);
+  advanceTradeRoutes(world);
 
   for (const kingdom of world.kingdoms) {
     applyKingdomEconomy(world, kingdom);
     advanceConstruction(world, kingdom);
+    advanceResearch(world, kingdom);
   }
 
+  advanceWars(world);
+  collectVassalTributes(world);
+  advanceDiplomaticDrift(world);
+  updateVictory(world);
   updateMarket(world);
 
   if (world.time.day >= world.ai.nextDecisionDay) {
@@ -1157,6 +1557,7 @@ function expireDiplomaticTreaties(world) {
 function applyKingdomEconomy(world, kingdom) {
   const regions = world.regions.filter((item) => item.kingdomId === kingdom.id);
   const holdings = world.holdings.filter((item) => item.kingdomId === kingdom.id);
+  const techEffects = getTechEffects(world, kingdom);
   const delta = {
     gold: 0,
     food: 0,
@@ -1181,8 +1582,8 @@ function applyKingdomEconomy(world, kingdom) {
       delta[key] = (delta[key] ?? 0) + value * multiplier;
     }
 
-    regionItem.prosperity = clampNumber((regionItem.prosperity ?? regionItem.development) + kingdom.resources.stability / 260 - kingdom.resources.threat / 220, 20, 100);
-    regionItem.control = clampNumber(regionItem.control + kingdom.resources.stability / 280 - kingdom.resources.threat / 260, 20, 100);
+    regionItem.prosperity = clampNumber((regionItem.prosperity ?? regionItem.development) + kingdom.resources.stability / 260 - kingdom.resources.threat / 220 + techEffects.prosperityDaily, 20, 100);
+    regionItem.control = clampNumber(regionItem.control + kingdom.resources.stability / 280 - kingdom.resources.threat / 260 + techEffects.controlDaily, 20, 100);
   }
 
   for (const holdingItem of holdings) {
@@ -1226,6 +1627,18 @@ function applyKingdomEconomy(world, kingdom) {
 
   applyTreatyEconomy(world, kingdom, delta);
 
+  if (delta.food > 0) {
+    delta.food *= 1 + techEffects.foodYield;
+  }
+  if (delta.gold > 0) {
+    delta.gold *= 1 + techEffects.goldYield;
+  }
+  delta.gold += techEffects.tradeIncome * 2.5;
+  delta.technology += techEffects.researchPower * 0.35;
+  delta.stability += techEffects.stabilityDaily;
+  delta.prosperity += techEffects.prosperityDaily;
+  delta.threat += techEffects.threatDaily;
+
   for (const key of ['gold', 'food', 'wood', 'stone', 'iron', 'influence', 'technology']) {
     kingdom.resources[key] = clampResource(kingdom.resources[key] + (delta[key] ?? 0));
   }
@@ -1254,16 +1667,21 @@ function applyKingdomEconomy(world, kingdom) {
 
 function applyTreatyEconomy(world, kingdom, delta) {
   const treaties = world.diplomacy.treaties.filter((treaty) => treaty.fromKingdomId === kingdom.id || treaty.toKingdomId === kingdom.id);
+  const allianceTreaties = treaties.filter((treaty) => treaty.type === 'alliance').length;
   const tradeTreaties = treaties.filter((treaty) => treaty.type === 'trade').length;
   const peaceTreaties = treaties.filter((treaty) => treaty.type === 'non_aggression').length;
   const researchTreaties = treaties.filter((treaty) => treaty.type === 'research').length;
+  const tributeTreaties = treaties.filter((treaty) => treaty.type === 'tribute').length;
 
   delta.gold += tradeTreaties * 3;
+  delta.gold += tributeTreaties * 2;
   delta.food += tradeTreaties * 1;
   delta.influence += treaties.length * 0.15;
   delta.technology += researchTreaties * 1.2;
-  delta.threat -= peaceTreaties * 0.16;
-  delta.prosperity += tradeTreaties * 0.08 + researchTreaties * 0.05;
+  delta.army += allianceTreaties * 0.35;
+  delta.stability += allianceTreaties * 0.08;
+  delta.threat -= peaceTreaties * 0.16 + allianceTreaties * 0.08;
+  delta.prosperity += tradeTreaties * 0.08 + researchTreaties * 0.05 + tributeTreaties * 0.05;
 }
 
 function advanceConstruction(world, kingdom) {
@@ -1288,11 +1706,251 @@ function advanceConstruction(world, kingdom) {
   }
 }
 
+function advanceResearch(world, kingdom) {
+  ensureTechnologyState(world);
+  const active = world.technology.active[kingdom.id];
+  if (!active) {
+    return;
+  }
+
+  const tech = technologyTree.find((item) => item.id === active.techId);
+  if (!tech) {
+    world.technology.active[kingdom.id] = null;
+    return;
+  }
+
+  const power = calculateResearchPower(world, kingdom);
+  active.power = power;
+  active.progress = clampNumber((active.progress ?? 0) + power, 0, active.required ?? tech.baseDays);
+
+  if (active.progress < (active.required ?? tech.baseDays)) {
+    return;
+  }
+
+  if (!world.technology.completed[kingdom.id].includes(tech.id)) {
+    world.technology.completed[kingdom.id].push(tech.id);
+  }
+  world.technology.active[kingdom.id] = null;
+  kingdom.resources.technology = clampResource(kingdom.resources.technology + Math.max(4, tech.tier * 3));
+  kingdom.resources.prosperity = clampNumber(kingdom.resources.prosperity + 1 + tech.tier, 0, 100);
+  pushEvent(world, 'research', 'Технология изучена', `${kingdom.name} завершает "${tech.name}". ${tech.description}`, kingdom.id, { technology: tech.tier * 3 });
+}
+
+function advanceTradeRoutes(world) {
+  if (!world.market.routes?.length) {
+    return;
+  }
+
+  const activeRoutes = [];
+  for (const route of world.market.routes) {
+    if (route.status === 'expired') {
+      continue;
+    }
+
+    const from = world.kingdoms.find((item) => item.id === route.fromKingdomId);
+    const to = world.kingdoms.find((item) => item.id === route.toKingdomId);
+    if (!from || !to || isAtWar(world, from.id, to.id)) {
+      route.status = 'expired';
+      continue;
+    }
+
+    const exporter = route.direction === 'export' ? from : to;
+    const importer = route.direction === 'export' ? to : from;
+    const exporterEffects = getTechEffects(world, exporter);
+    const importerEffects = getTechEffects(world, importer);
+    const price = world.market.prices[route.resource] ?? 3;
+    const amount = clampNumber(Number(route.amount ?? 12), 4, 60);
+    const importerCost = Math.ceil(price * amount * (0.48 - Math.min(0.22, importerEffects.marketDiscount * 0.7)));
+    const exporterGain = Math.ceil(price * amount * (0.52 + Math.min(0.3, exporterEffects.tradeIncome)));
+
+    if (exporter.resources[route.resource] < amount || importer.resources.gold < importerCost) {
+      route.status = 'strained';
+      route.pausedDays = (route.pausedDays ?? 0) + 1;
+      if (route.pausedDays === 1) {
+        pushEvent(world, 'trade', 'Маршрут буксует', `${from.name} и ${to.name}: торговый маршрут по ${route.resource} ждёт запасов.`, from.id);
+      }
+      if (route.pausedDays > 5) {
+        route.status = 'expired';
+        pushEvent(world, 'warning', 'Маршрут закрыт', `${from.name} и ${to.name}: торговый маршрут по ${route.resource} закрыт из-за срыва поставок.`, from.id);
+        continue;
+      }
+      activeRoutes.push(route);
+      continue;
+    }
+
+    route.status = 'active';
+    route.pausedDays = 0;
+    exporter.resources[route.resource] = clampResource(exporter.resources[route.resource] - amount);
+    importer.resources[route.resource] = clampResource(importer.resources[route.resource] + amount);
+    exporter.resources.gold = clampResource(exporter.resources.gold + exporterGain);
+    importer.resources.gold = clampResource(importer.resources.gold - importerCost);
+    route.volume = (route.volume ?? 0) + amount;
+    route.remainingDays -= 1;
+    world.market.volume += amount;
+    world.market.trend[route.resource] = (world.market.trend[route.resource] ?? 0) + (route.direction === 'import' ? 0.05 : -0.05);
+    adjustRelation(world, from.id, to.id, 0.06);
+
+    if (route.remainingDays <= 0) {
+      route.status = 'expired';
+      pushEvent(world, 'trade', 'Маршрут завершён', `${from.name} и ${to.name}: торговый маршрут по ${route.resource} выполнил контракт.`, from.id);
+      continue;
+    }
+
+    activeRoutes.push(route);
+  }
+
+  world.market.routes = activeRoutes.slice(-18);
+}
+
+function advanceWars(world) {
+  const keptWars = [];
+
+  for (const war of world.wars ?? []) {
+    if (war.status !== 'active') {
+      const age = (world.time.year - (war.endedYear ?? war.startedYear ?? world.time.year)) * 360 + world.time.day - (war.endedDay ?? war.startedDay ?? world.time.day);
+      if (age < 35) {
+        keptWars.push(war);
+      }
+      continue;
+    }
+
+    const attacker = world.kingdoms.find((item) => item.id === war.attackerKingdomId);
+    const defender = world.kingdoms.find((item) => item.id === war.defenderKingdomId);
+    if (!attacker || !defender) {
+      war.status = 'resolved';
+      continue;
+    }
+
+    war.days = (war.days ?? 0) + 1;
+    const attackerArmy = world.armies.find((item) => item.kingdomId === attacker.id);
+    const defenderArmy = world.armies.find((item) => item.kingdomId === defender.id);
+    const attackerEffects = getTechEffects(world, attacker);
+    const defenderEffects = getTechEffects(world, defender);
+    const defenderFort = average(world.regions.filter((item) => item.kingdomId === defender.id).map((item) => item.fortLevel));
+    const attackerMorale = (attackerArmy?.morale ?? 68) / 100;
+    const defenderMorale = (defenderArmy?.morale ?? 70) / 100;
+    const attackerPower = attacker.resources.army * attackerMorale * (1 + attackerEffects.warAttack) + randomInt(8, 34);
+    const defenderPower = defender.resources.army * defenderMorale * (1 + defenderEffects.warDefense) + defenderFort * 18 * (1 - Math.min(0.45, attackerEffects.enemyFortBypass)) + randomInt(8, 34);
+    const attackerLosses = Math.ceil(clampNumber(5 + defenderPower / 42, 4, 42) * (1 - Math.min(0.32, attackerEffects.warDefense * 0.6)));
+    const defenderLosses = Math.ceil(clampNumber(5 + attackerPower / 40, 4, 48) * (1 - Math.min(0.32, defenderEffects.warDefense * 0.65)));
+    const attackerFoodUse = Math.ceil(8 + attacker.resources.army / 35);
+    const defenderFoodUse = Math.ceil(7 + defender.resources.army / 38);
+
+    attacker.resources.army = clampResource(attacker.resources.army - attackerLosses);
+    defender.resources.army = clampResource(defender.resources.army - defenderLosses);
+    attacker.resources.food = clampResource(attacker.resources.food - attackerFoodUse);
+    defender.resources.food = clampResource(defender.resources.food - defenderFoodUse);
+    attacker.resources.threat = clampNumber(attacker.resources.threat + 0.35, 0, 100);
+    defender.resources.threat = clampNumber(defender.resources.threat + 0.45, 0, 100);
+
+    if (attackerPower > defenderPower) {
+      war.attackerWarScore = clampNumber((war.attackerWarScore ?? 0) + 3, -100, 100);
+    } else {
+      war.attackerWarScore = clampNumber((war.attackerWarScore ?? 0) - 2, -100, 100);
+    }
+    war.defenderWarScore = -war.attackerWarScore;
+
+    if (attacker.resources.food <= 0) {
+      attacker.resources.stability = clampNumber(attacker.resources.stability - 2.2, 0, 100);
+      war.attackerWarScore = clampNumber(war.attackerWarScore - 3, -100, 100);
+    }
+    if (defender.resources.food <= 0) {
+      defender.resources.stability = clampNumber(defender.resources.stability - 2.2, 0, 100);
+      war.attackerWarScore = clampNumber(war.attackerWarScore + 3, -100, 100);
+    }
+    if (attacker.resources.army <= 0) {
+      attacker.resources.stability = clampNumber(attacker.resources.stability - 8.5, 0, 100);
+      war.attackerWarScore = clampNumber(war.attackerWarScore - 7, -100, 100);
+    }
+    if (defender.resources.army <= 0) {
+      defender.resources.stability = clampNumber(defender.resources.stability - 8.5, 0, 100);
+      war.attackerWarScore = clampNumber(war.attackerWarScore + 7, -100, 100);
+    }
+
+    syncArmyFromKingdom(world, attacker);
+    syncArmyFromKingdom(world, defender);
+    if (attackerArmy) {
+      attackerArmy.status = 'campaigning';
+      attackerArmy.morale = clampNumber(attackerArmy.morale + (attackerPower > defenderPower ? 0.3 : -0.5), 8, 100);
+    }
+    if (defenderArmy) {
+      defenderArmy.status = 'defending';
+      defenderArmy.morale = clampNumber(defenderArmy.morale + (defenderPower >= attackerPower ? 0.2 : -0.6), 8, 100);
+    }
+
+    if (war.days % 5 === 0 || attacker.resources.army <= 0 || defender.resources.army <= 0) {
+      pushEvent(world, 'war', 'Военная сводка', `${attacker.name} против ${defender.name}: потери ${attackerLosses}/${defenderLosses}, счёт ${Math.floor(war.attackerWarScore)}.`, attacker.id);
+    }
+
+    if (attacker.resources.stability <= 0) {
+      finishWar(world, war, defender.id, attacker.id);
+    } else if (defender.resources.stability <= 0) {
+      finishWar(world, war, attacker.id, defender.id);
+    }
+
+    keptWars.push(war);
+  }
+
+  world.wars = keptWars.slice(-12);
+}
+
 function syncBuildLimit(kingdom, holdings) {
   const buildLimitBonus = holdings
     .flatMap((item) => item.buildings)
     .reduce((sum, building) => sum + (buildingCatalog[building.type]?.effects?.buildLimit ?? 0), 0);
   kingdom.resources.buildLimit = clampResource((kingdom.baseBuildLimit ?? 4) + buildLimitBonus);
+}
+
+function collectVassalTributes(world) {
+  const vassals = world.diplomacy.vassals ?? {};
+
+  for (const [subjectId, overlordId] of Object.entries(vassals)) {
+    const subject = world.kingdoms.find((item) => item.id === subjectId);
+    const overlord = world.kingdoms.find((item) => item.id === overlordId);
+    if (!subject || !overlord || isAtWar(world, subject.id, overlord.id)) {
+      continue;
+    }
+
+    const effects = getTechEffects(world, overlord);
+    const multiplier = 1 + Math.min(0.35, effects.vassalTribute);
+    const gold = Math.min(subject.resources.gold, Math.ceil((2 + subject.resources.prosperity / 45) * multiplier));
+    const food = Math.min(subject.resources.food, Math.ceil((1 + subject.resources.population / 520) * multiplier));
+    subject.resources.gold = clampResource(subject.resources.gold - gold);
+    subject.resources.food = clampResource(subject.resources.food - food);
+    overlord.resources.gold = clampResource(overlord.resources.gold + gold);
+    overlord.resources.food = clampResource(overlord.resources.food + food);
+    if (world.time.day % 3 === 0) {
+      overlord.resources.influence = clampResource(overlord.resources.influence + Math.max(1, Math.floor(multiplier)));
+    }
+    subject.resources.stability = clampNumber(subject.resources.stability - 0.03, 0, 100);
+
+    if (world.time.day % 30 === 0) {
+      pushEvent(world, 'diplomacy', 'Вассальная дань', `${subject.name} отправляет дань сюзерену ${overlord.name}.`, overlord.id, { gold, food });
+    }
+  }
+}
+
+function advanceDiplomaticDrift(world) {
+  for (const source of world.kingdoms) {
+    const sourceEffects = getTechEffects(world, source);
+    for (const target of world.kingdoms) {
+      if (source.id === target.id || source.id > target.id) {
+        continue;
+      }
+
+      let drift = 0;
+      if (hasDiplomaticTreaty(world, source.id, target.id, 'trade')) drift += 0.035;
+      if (hasDiplomaticTreaty(world, source.id, target.id, 'research')) drift += 0.03;
+      if (hasDiplomaticTreaty(world, source.id, target.id, 'alliance')) drift += 0.05;
+      if (isAtWar(world, source.id, target.id)) drift -= 0.32;
+      if (world.diplomacy.vassals?.[source.id] === target.id || world.diplomacy.vassals?.[target.id] === source.id) drift += 0.025;
+
+      drift += sourceEffects.relationDrift + getTechEffects(world, target).relationDrift;
+      if (Math.abs(drift) > 0) {
+        adjustRelation(world, source.id, target.id, drift);
+      }
+    }
+  }
 }
 
 function updateMarket(world) {
@@ -1354,6 +2012,13 @@ function runAi(world) {
       performAiAction(world, kingdom, 'technology:fundResearch', { kingdomId: kingdom.id });
     }
 
+    if (!world.technology?.active?.[kingdom.id] && kingdom.resources.gold > 95 && Math.random() < 0.28) {
+      const tech = chooseAiTechnology(world, kingdom);
+      if (tech) {
+        performAiAction(world, kingdom, 'technology:startResearch', { kingdomId: kingdom.id, techId: tech.id });
+      }
+    }
+
     if (kingdom.resources.influence > 50 && Math.random() < 0.14) {
       const friendly = world.kingdoms
         .filter((target) => target.id !== kingdom.id)
@@ -1368,10 +2033,52 @@ function runAi(world) {
       }
     }
 
+    if (kingdom.resources.gold > 120 && kingdom.resources.influence > 22 && Math.random() < 0.16) {
+      const partner = world.kingdoms
+        .filter((target) => target.id !== kingdom.id && !isAtWar(world, kingdom.id, target.id))
+        .filter((target) => (world.diplomacy.relations[kingdom.id]?.[target.id] ?? 0) > 54)
+        .find((target) => !(world.market.routes ?? []).some((route) => (
+          route.status !== 'expired'
+          && route.fromKingdomId === kingdom.id
+          && route.toKingdomId === target.id
+        )));
+      if (partner) {
+        performAiAction(world, kingdom, 'market:createRoute', {
+          kingdomId: kingdom.id,
+          partnerKingdomId: partner.id,
+          resource: kingdom.resources.food > kingdom.resources.wood ? 'food' : 'wood',
+          direction: 'export',
+          amount: 12,
+        });
+      }
+    }
+
+    if (kingdom.resources.influence > 80 && Math.random() < 0.07) {
+      const weakFriend = world.kingdoms
+        .filter((target) => target.id !== kingdom.id && !world.diplomacy.vassals?.[target.id])
+        .filter((target) => (world.diplomacy.relations[kingdom.id]?.[target.id] ?? 0) > 72)
+        .find((target) => kingdom.resources.army > target.resources.army * 1.35 || target.resources.stability < 38);
+      if (weakFriend) {
+        performAiAction(world, kingdom, 'diplomacy:demandVassalage', { fromKingdomId: kingdom.id, toKingdomId: weakFriend.id });
+      }
+    }
+
     if (kingdom.resources.threat > 44 && kingdom.resources.army > 210 && Math.random() < 0.2) {
       const possibleTargets = world.regions.filter((item) => item.kingdomId !== kingdom.id);
       const target = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
       raidRegionByAi(world, kingdom, target);
+    }
+
+    if (kingdom.resources.army > 260 && kingdom.resources.food > 180 && Math.random() < 0.08) {
+      const target = world.kingdoms
+        .filter((item) => item.id !== kingdom.id)
+        .filter((item) => !isAtWar(world, kingdom.id, item.id))
+        .filter((item) => world.diplomacy.vassals?.[item.id] !== kingdom.id)
+        .filter((item) => (world.diplomacy.relations[kingdom.id]?.[item.id] ?? 50) < 34)
+        .sort((a, b) => a.resources.army - b.resources.army)[0];
+      if (target && kingdom.resources.army > target.resources.army * 1.18) {
+        performAiAction(world, kingdom, 'war:declare', { attackerKingdomId: kingdom.id, defenderKingdomId: target.id });
+      }
     }
   }
 }
@@ -1443,6 +2150,253 @@ function terrainYield(terrain) {
   };
 
   return yields[terrain] ?? { food: 3, wood: 2, stone: 1 };
+}
+
+function ensureTechnologyState(world) {
+  if (!world.technology) {
+    world.technology = createTechnologyState(world.kingdoms);
+  }
+
+  world.technology.completed ??= {};
+  world.technology.active ??= {};
+  world.technology.tree = technologyTree;
+  for (const kingdom of world.kingdoms) {
+    if (!world.technology.completed[kingdom.id]) {
+      world.technology.completed[kingdom.id] = [];
+    }
+    if (!Object.prototype.hasOwnProperty.call(world.technology.active, kingdom.id)) {
+      world.technology.active[kingdom.id] = null;
+    }
+  }
+}
+
+function calculateResearchPower(world, kingdom) {
+  const holdings = world.holdings.filter((item) => item.kingdomId === kingdom.id);
+  const buildings = holdings.flatMap((item) => item.buildings).filter((building) => building.status === 'active');
+  let power = 1;
+
+  power += holdings.filter((item) => item.kind === 'capital').length * 0.35;
+  power += buildings.filter((item) => item.type === 'market').length * 0.22;
+  power += buildings.filter((item) => item.type === 'warehouse').length * 0.2;
+  power += buildings.filter((item) => item.type === 'house').length * 0.1;
+  power += buildings.filter((item) => ['quarry', 'lumberyard', 'farm'].includes(item.type)).length * 0.05;
+  power += buildings.filter((item) => ['barracks', 'archeryRange', 'watchtower'].includes(item.type)).length * (kingdom.policies.research === 'military' ? 0.11 : 0.05);
+  power += kingdom.policies.research === 'engineering' ? 0.55 : kingdom.policies.research === 'military' ? 0.28 : 0.18;
+  power += getTechEffects(world, kingdom).researchPower;
+  power += world.diplomacy.treaties
+    .filter((treaty) => treaty.type === 'research' && [treaty.fromKingdomId, treaty.toKingdomId].includes(kingdom.id))
+    .length * 0.22;
+
+  return Math.round(power * 100) / 100;
+}
+
+function getTechEffects(world, kingdomOrId) {
+  ensureTechnologyState(world);
+  const kingdomId = typeof kingdomOrId === 'string' ? kingdomOrId : kingdomOrId?.id;
+  const effects = {
+    controlDaily: 0,
+    diplomacyWeight: 0,
+    enemyFortBypass: 0,
+    foodYield: 0,
+    fortifyDiscount: 0,
+    goldYield: 0,
+    marketDiscount: 0,
+    moraleDaily: 0,
+    prosperityDaily: 0,
+    relationDrift: 0,
+    researchPower: 0,
+    stabilityDaily: 0,
+    threatDaily: 0,
+    tradeIncome: 0,
+    treatyDiscount: 0,
+    vassalTribute: 0,
+    warAttack: 0,
+    warDefense: 0,
+  };
+
+  if (!kingdomId) {
+    return effects;
+  }
+
+  for (const techId of world.technology.completed[kingdomId] ?? []) {
+    const tech = technologyTree.find((item) => item.id === techId);
+    if (!tech) continue;
+    for (const [key, value] of Object.entries(tech.effects ?? {})) {
+      effects[key] = (effects[key] ?? 0) + value;
+    }
+  }
+
+  return effects;
+}
+
+function chooseAiTechnology(world, kingdom) {
+  ensureTechnologyState(world);
+  const completed = new Set(world.technology.completed[kingdom.id] ?? []);
+  const branchPreference = kingdom.aiFocus.includes('barracks') || kingdom.aiFocus.includes('watchtower')
+    ? ['military', 'economy', 'trade', 'diplomacy']
+    : kingdom.aiFocus.includes('market')
+      ? ['trade', 'economy', 'diplomacy', 'military']
+      : ['economy', 'military', 'trade', 'diplomacy'];
+
+  return technologyTree
+    .filter((tech) => !completed.has(tech.id))
+    .filter((tech) => tech.requires.every((requirement) => completed.has(requirement)))
+    .filter((tech) => canAfford(kingdom.resources, tech.cost))
+    .sort((a, b) => branchPreference.indexOf(a.branch) - branchPreference.indexOf(b.branch) || a.tier - b.tier)[0];
+}
+
+function scaleCost(cost, multiplier) {
+  return Object.fromEntries(Object.entries(cost).map(([key, value]) => [
+    key,
+    Math.max(1, Math.ceil(value * multiplier)),
+  ]));
+}
+
+function hasDiplomaticTreaty(world, firstId, secondId, type) {
+  return world.diplomacy.treaties.some((treaty) => (
+    treaty.type === type
+    && [treaty.fromKingdomId, treaty.toKingdomId].includes(firstId)
+    && [treaty.fromKingdomId, treaty.toKingdomId].includes(secondId)
+  ));
+}
+
+function breakTreatiesBetween(world, firstId, secondId) {
+  world.diplomacy.treaties = world.diplomacy.treaties.filter((treaty) => !(
+    [treaty.fromKingdomId, treaty.toKingdomId].includes(firstId)
+    && [treaty.fromKingdomId, treaty.toKingdomId].includes(secondId)
+  ));
+}
+
+function isAtWar(world, firstId, secondId) {
+  return (world.wars ?? []).some((war) => (
+    war.status === 'active'
+    && [war.attackerKingdomId, war.defenderKingdomId].includes(firstId)
+    && [war.attackerKingdomId, war.defenderKingdomId].includes(secondId)
+  ));
+}
+
+function syncArmyFromKingdom(world, kingdom) {
+  const army = world.armies.find((item) => item.kingdomId === kingdom.id);
+  if (army) {
+    army.strength = kingdom.resources.army;
+  }
+}
+
+function finishWar(world, war, winnerId, loserId) {
+  const winner = world.kingdoms.find((item) => item.id === winnerId);
+  const loser = world.kingdoms.find((item) => item.id === loserId);
+  if (!winner || !loser) {
+    war.status = 'resolved';
+    return;
+  }
+
+  war.status = 'resolved';
+  war.endedDay = world.time.day;
+  war.endedYear = world.time.year;
+  war.winnerKingdomId = winner.id;
+  war.loserKingdomId = loser.id;
+  loser.resources.stability = clampNumber(Math.max(loser.resources.stability, 18), 0, 100);
+  loser.resources.threat = clampNumber(loser.resources.threat - 8, 0, 100);
+  winner.resources.influence = clampResource(winner.resources.influence + 14);
+  vassalizeKingdom(world, winner.id, loser.id, 'war');
+  pushEvent(world, 'war', 'Война окончена', `${winner.name} побеждает. ${loser.name} приносит вассальную клятву.`, winner.id, { influence: 14 });
+}
+
+function vassalizeKingdom(world, overlordId, subjectId, source = 'diplomacy') {
+  if (overlordId === subjectId) {
+    return false;
+  }
+
+  world.diplomacy.vassals ??= {};
+  const overlord = world.kingdoms.find((item) => item.id === overlordId);
+  const subject = world.kingdoms.find((item) => item.id === subjectId);
+  if (!overlord || !subject || wouldCreateVassalCycle(world, overlordId, subjectId)) {
+    return false;
+  }
+
+  const previousOverlordId = world.diplomacy.vassals[subjectId];
+  if (previousOverlordId) {
+    const previousOverlord = world.kingdoms.find((item) => item.id === previousOverlordId);
+    if (previousOverlord) {
+      previousOverlord.vassals = (previousOverlord.vassals ?? []).filter((id) => id !== subjectId);
+    }
+  }
+
+  world.diplomacy.vassals[subjectId] = overlordId;
+  subject.overlordId = overlordId;
+  subject.vassals ??= [];
+  overlord.vassals = [...new Set([...(overlord.vassals ?? []), subjectId])];
+  adjustRelation(world, overlordId, subjectId, source === 'war' ? 4 : 12);
+  breakTreatiesBetween(world, overlordId, subjectId);
+
+  for (const otherWar of world.wars ?? []) {
+    if (otherWar.status === 'active' && [otherWar.attackerKingdomId, otherWar.defenderKingdomId].includes(subjectId) && [otherWar.attackerKingdomId, otherWar.defenderKingdomId].includes(overlordId)) {
+      otherWar.status = 'resolved';
+      otherWar.endedDay = world.time.day;
+      otherWar.endedYear = world.time.year;
+      otherWar.winnerKingdomId = overlordId;
+      otherWar.loserKingdomId = subjectId;
+    }
+  }
+
+  updateVictory(world);
+  return true;
+}
+
+function wouldCreateVassalCycle(world, overlordId, subjectId) {
+  let current = overlordId;
+  const seen = new Set();
+  while (current) {
+    if (current === subjectId) {
+      return true;
+    }
+    if (seen.has(current)) {
+      return true;
+    }
+    seen.add(current);
+    current = world.diplomacy.vassals?.[current];
+  }
+  return false;
+}
+
+function controlsThroughVassals(world, overlordId, subjectId) {
+  let current = world.diplomacy.vassals?.[subjectId];
+  const seen = new Set();
+  while (current) {
+    if (current === overlordId) {
+      return true;
+    }
+    if (seen.has(current)) {
+      return false;
+    }
+    seen.add(current);
+    current = world.diplomacy.vassals?.[current];
+  }
+  return false;
+}
+
+function updateVictory(world) {
+  world.victory ??= {
+    objective: 'vassalize_all',
+    completed: false,
+    winnerKingdomId: null,
+  };
+
+  if (world.victory.completed) {
+    return;
+  }
+
+  const winner = world.kingdoms.find((kingdom) => world.kingdoms.every((target) => (
+    target.id === kingdom.id || controlsThroughVassals(world, kingdom.id, target.id)
+  )));
+
+  if (!winner) {
+    return;
+  }
+
+  world.victory.completed = true;
+  world.victory.winnerKingdomId = winner.id;
+  pushEvent(world, 'success', 'Континент подчинён', `${winner.name} вассализирует все державы и становится верховной короной острова.`, winner.id, { influence: 25 });
 }
 
 function canControlKingdom(world, socketId, kingdomId) {

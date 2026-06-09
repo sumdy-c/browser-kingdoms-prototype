@@ -102,6 +102,8 @@ export interface Kingdom {
   aiFocus: BuildingType[];
   capitalRegionId: string;
   baseBuildLimit?: number;
+  overlordId?: string | null;
+  vassals?: string[];
   resources: Resources;
   policies: {
     taxation: 'low' | 'balanced' | 'war';
@@ -148,6 +150,22 @@ export interface MarketState {
   trend: Record<'food' | 'wood' | 'stone' | 'iron', number>;
   open: boolean;
   volume: number;
+  routes?: TradeRoute[];
+}
+
+export interface TradeRoute {
+  id: string;
+  fromKingdomId: string;
+  toKingdomId: string;
+  resource: 'food' | 'wood' | 'stone' | 'iron';
+  direction: 'import' | 'export';
+  amount: number;
+  startedDay?: number;
+  startedYear?: number;
+  remainingDays: number;
+  status: 'active' | 'strained' | 'expired';
+  volume?: number;
+  pausedDays?: number;
 }
 
 export interface DiplomacyState {
@@ -161,6 +179,56 @@ export interface DiplomacyState {
     signedYear?: number;
     durationDays?: number;
   }>;
+  vassals?: Record<string, string>;
+}
+
+export interface TechnologyNode {
+  id: string;
+  name: string;
+  branch: 'economy' | 'trade' | 'military' | 'diplomacy' | string;
+  tier: number;
+  baseDays: number;
+  cost: Partial<Record<CoreResourceKey, number>>;
+  requires: string[];
+  description: string;
+  effects: Record<string, number>;
+}
+
+export interface ActiveResearch {
+  techId: string;
+  progress: number;
+  required: number;
+  startedDay?: number;
+  startedYear?: number;
+  power?: number;
+}
+
+export interface TechnologyState {
+  tree: TechnologyNode[];
+  completed: Record<string, string[]>;
+  active: Record<string, ActiveResearch | null>;
+}
+
+export interface WarState {
+  id: string;
+  attackerKingdomId: string;
+  defenderKingdomId: string;
+  startedDay?: number;
+  startedYear?: number;
+  endedDay?: number;
+  endedYear?: number;
+  days: number;
+  status: 'active' | 'resolved';
+  attackerWarScore: number;
+  defenderWarScore: number;
+  winnerKingdomId?: string | null;
+  loserKingdomId?: string | null;
+}
+
+export interface VictoryState {
+  objective: string;
+  completed: boolean;
+  winnerKingdomId?: string | null;
 }
 
 export interface WorldMapState {
@@ -183,6 +251,9 @@ export interface WorldState {
   armies: Army[];
   market: MarketState;
   diplomacy: DiplomacyState;
+  technology?: TechnologyState;
+  wars?: WarState[];
+  victory?: VictoryState;
   events: GameEvent[];
   buildingCatalog: Record<BuildingType, BuildingCatalogItem>;
   onlinePlayers: number;

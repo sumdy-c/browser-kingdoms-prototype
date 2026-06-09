@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
-import type { GameEvent, Holding, Kingdom, PlayerMode, Region, ResourceKey, WorldState } from '../types';
+import type { CoreResourceKey, GameEvent, Holding, Kingdom, PlayerMode, Region, ResourceKey, TechnologyNode, TradeRoute, WarState, WorldState } from '../types';
 import { KINGDOM_ASSETS, RESOURCE_ICONS, RESOURCE_LABELS } from '../types';
 
 interface StrategyScreenProps {
@@ -86,6 +86,25 @@ const policyLabels: Record<string, string> = {
   raiders: 'Рейды',
   stewardship: 'Управление',
   war: 'Военные налоги',
+};
+
+const techBranchLabels: Record<string, string> = {
+  diplomacy: 'Дипломатия',
+  economy: 'Экономика',
+  military: 'Война',
+  trade: 'Торговля',
+};
+
+const techBranchIcons: Record<string, string> = {
+  diplomacy: '/assets/ui/icon-diplomacy.png',
+  economy: '/assets/ui/icon-economy.png',
+  military: '/assets/ui/icon-army.png',
+  trade: '/assets/events/event-trade.png',
+};
+
+const routeDirectionLabels: Record<TradeRoute['direction'], string> = {
+  export: 'Экспорт',
+  import: 'Импорт',
 };
 
 const holdingIcons: Record<Holding['kind'], string> = {
@@ -181,6 +200,7 @@ const eventIcons: Record<string, string> = {
   success: '/assets/events/event-success.png',
   trade: '/assets/events/event-trade.png',
   warning: '/assets/events/event-warning.png',
+  war: '/assets/events/event-army.png',
 };
 
 function formatNumber(value: number) {
@@ -279,6 +299,123 @@ function estimateIncome(world: WorldState, kingdom: Kingdom | undefined, resourc
     }, 0);
 }
 
+function estimateResearchPower(world: WorldState, kingdom: Kingdom | undefined) {
+  if (!kingdom) {
+    return 0;
+  }
+
+  const holdings = world.holdings.filter((holding) => holding.kingdomId === kingdom.id);
+  const buildings = holdings.flatMap((holding) => holding.buildings).filter((building) => building.status === 'active');
+  let power = 1;
+  power += holdings.filter((holding) => holding.kind === 'capital').length * 0.35;
+  power += buildings.filter((building) => building.type === 'market').length * 0.22;
+  power += buildings.filter((building) => building.type === 'warehouse').length * 0.2;
+  power += buildings.filter((building) => building.type === 'house').length * 0.1;
+  power += buildings.filter((building) => ['quarry', 'lumberyard', 'farm'].includes(building.type)).length * 0.05;
+  power += buildings.filter((building) => ['barracks', 'archeryRange', 'watchtower'].includes(building.type)).length * (kingdom.policies.research === 'military' ? 0.11 : 0.05);
+  power += kingdom.policies.research === 'engineering' ? 0.55 : kingdom.policies.research === 'military' ? 0.28 : 0.18;
+  return Math.round(power * 100) / 100;
+}
+
+function formatCost(cost: Partial<Record<CoreResourceKey, number>>) {
+  return Object.entries(cost)
+    .map(([resource, amount]) => `${RESOURCE_LABELS[resource as ResourceKey]} ${formatNumber(amount ?? 0)}`)
+    .join(' · ');
+}
+
+function completedTechs(world: WorldState, kingdomId: string) {
+  return new Set(world.technology?.completed?.[kingdomId] ?? []);
+}
+
+function activeResearchFor(world: WorldState, kingdomId: string) {
+  return world.technology?.active?.[kingdomId] ?? null;
+}
+
+function techStatus(world: WorldState, kingdom: Kingdom, tech: TechnologyNode) {
+  const completed = completedTechs(world, kingdom.id);
+  const active = activeResearchFor(world, kingdom.id);
+  if (completed.has(tech.id)) {
+    return 'completed';
+  }
+
+  if (active?.techId === tech.id) {
+    return 'active';
+  }
+
+  if (tech.requires.some((requirement) => !completed.has(requirement))) {
+    return 'locked';
+  }
+
+  if (active) {
+    return 'queued';
+  }
+
+  return 'available';
+}
+
+function techStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    active: 'исследуется',
+    available: 'доступно',
+    completed: 'изучено',
+    locked: 'закрыто',
+    queued: 'ожидает',
+  };
+
+  return labels[status] ?? status;
+}
+
+function missingRequirements(world: WorldState, kingdom: Kingdom, tech: TechnologyNode) {
+  const completed = completedTechs(world, kingdom.id);
+  return tech.requires
+    .filter((requirement) => !completed.has(requirement))
+    .map((requirement) => world.technology?.tree.find((node) => node.id === requirement)?.name ?? requirement);
+}
+
+function activeWarBetween(world: WorldState, firstId: string, secondId: string) {
+  return (world.wars ?? []).find((war) => (
+    war.status === 'active'
+    && [war.attackerKingdomId, war.defenderKingdomId].includes(firstId)
+    && [war.attackerKingdomId, war.defenderKingdomId].includes(secondId)
+  ));
+}
+
+function warsForKingdom(world: WorldState, kingdomId: string) {
+  return (world.wars ?? []).filter((war) => (
+    war.status === 'active'
+    && [war.attackerKingdomId, war.defenderKingdomId].includes(kingdomId)
+  ));
+}
+
+function warEnemyId(war: WarState, kingdomId: string) {
+  return war.attackerKingdomId === kingdomId ? war.defenderKingdomId : war.attackerKingdomId;
+}
+
+function warScoreFor(war: WarState, kingdomId: string) {
+  return war.attackerKingdomId === kingdomId ? war.attackerWarScore : war.defenderWarScore;
+}
+
+function directVassals(world: WorldState, kingdomId: string) {
+  return world.kingdoms.filter((kingdom) => world.diplomacy.vassals?.[kingdom.id] === kingdomId);
+}
+
+function overlordFor(world: WorldState, kingdomId: string) {
+  const overlordId = world.diplomacy.vassals?.[kingdomId];
+  return world.kingdoms.find((kingdom) => kingdom.id === overlordId);
+}
+
+function routePartner(world: WorldState, route: TradeRoute, kingdomId: string) {
+  const partnerId = route.fromKingdomId === kingdomId ? route.toKingdomId : route.fromKingdomId;
+  return world.kingdoms.find((kingdom) => kingdom.id === partnerId);
+}
+
+function routePerspective(route: TradeRoute, kingdomId: string): TradeRoute['direction'] {
+  if (route.fromKingdomId !== kingdomId) {
+    return route.direction === 'export' ? 'import' : 'export';
+  }
+  return route.direction;
+}
+
 function visibleEventsFor(world: WorldState, kingdom?: Kingdom) {
   return world.events
     .filter((event) => !kingdom || event.scope === 'world' || !event.kingdomId || event.kingdomId === kingdom.id)
@@ -304,9 +441,11 @@ function relationLabel(value: number) {
 
 function treatyLabel(type: string) {
   const labels: Record<string, string> = {
+    alliance: 'Оборонительный союз',
     non_aggression: 'Пакт о ненападении',
     research: 'Обмен учёными',
     trade: 'Торговый договор',
+    tribute: 'Договор о пошлинах',
   };
 
   return labels[type] ?? 'Договор';
@@ -314,9 +453,11 @@ function treatyLabel(type: string) {
 
 function treatyEffect(type: string) {
   const effects: Record<string, string> = {
+    alliance: '+мораль, стабильность и военная поддержка',
     non_aggression: 'угроза снижается каждый день',
     research: '+технологии и престиж архивов',
     trade: '+золото, еда и процветание',
+    tribute: '+золото и торговое влияние',
   };
 
   return effects[type] ?? 'дипломатический бонус';
@@ -342,6 +483,7 @@ function eventCategoryLabel(category: string) {
     success: 'Успех',
     trade: 'Торговля',
     warning: 'Тревога',
+    war: 'Война',
   };
 
   return labels[category] ?? 'Событие';
@@ -1240,6 +1382,25 @@ function MainWorkspace({
   const activeTreaties = useMemo(() => (
     kingdom ? world.diplomacy.treaties.filter((treaty) => treaty.fromKingdomId === kingdom.id || treaty.toKingdomId === kingdom.id) : []
   ), [kingdom, world.diplomacy.treaties]);
+  const activeRoutes = useMemo(() => (
+    kingdom ? (world.market.routes ?? []).filter((route) => (
+      route.status !== 'expired'
+      && (route.fromKingdomId === kingdom.id || route.toKingdomId === kingdom.id)
+    )) : []
+  ), [kingdom, world.market.routes]);
+  const activeWars = useMemo(() => (
+    kingdom ? warsForKingdom(world, kingdom.id) : []
+  ), [kingdom, world]);
+  const vassals = useMemo(() => (
+    kingdom ? directVassals(world, kingdom.id) : []
+  ), [kingdom, world]);
+  const overlord = kingdom ? overlordFor(world, kingdom.id) : undefined;
+  const researchPower = kingdom ? activeResearchFor(world, kingdom.id)?.power ?? estimateResearchPower(world, kingdom) : 0;
+  const activeResearch = kingdom ? activeResearchFor(world, kingdom.id) : null;
+  const activeResearchTech = activeResearch ? world.technology?.tree.find((tech) => tech.id === activeResearch.techId) : undefined;
+  const completedCount = kingdom ? completedTechs(world, kingdom.id).size : 0;
+  const techTree = world.technology?.tree ?? [];
+  const techBranches = Array.from(new Set(techTree.map((tech) => tech.branch)));
 
   if (!kingdom) {
     return (
@@ -1316,6 +1477,64 @@ function MainWorkspace({
 
           <section className="rebuild-workspace-card">
             <div className="rebuild-card-title">
+              <strong>Торговые маршруты</strong>
+              <span>{activeRoutes.length ? `${activeRoutes.length} действ.` : 'контрактов нет'}</span>
+            </div>
+            <div className="rebuild-route-board">
+              {activeRoutes.map((route) => {
+                const partner = routePartner(world, route, kingdom.id);
+                const perspective = routePerspective(route, kingdom.id);
+                return (
+                  <article className={route.status === 'strained' ? 'rebuild-route-row rebuild-route-row-alert' : 'rebuild-route-row'} key={route.id}>
+                    <img src={RESOURCE_ICONS[route.resource]} alt="" />
+                    <div>
+                      <strong>{routeDirectionLabels[perspective]} · {RESOURCE_LABELS[route.resource]}</strong>
+                      <span>{displayKingdom(partner).name} · {formatNumber(route.amount)}/день · осталось {route.remainingDays} дн.</span>
+                    </div>
+                    <b>{route.status === 'strained' ? 'сбой' : formatNumber(route.volume ?? 0)}</b>
+                  </article>
+                );
+              })}
+              {!activeRoutes.length && (
+                <article className="rebuild-route-row">
+                  <img src="/assets/events/event-trade.png" alt="" />
+                  <div>
+                    <strong>Нет постоянных контрактов</strong>
+                    <span>Откройте маршрут с державой, где отношения выше настороженности.</span>
+                  </div>
+                  <b>0</b>
+                </article>
+              )}
+
+              {world.kingdoms.filter((target) => target.id !== kingdom.id).slice(0, 5).map((target) => {
+                const relation = world.diplomacy.relations[kingdom.id]?.[target.id] ?? 45;
+                const blockedByWar = !!activeWarBetween(world, kingdom.id, target.id);
+                return (
+                  <article className="rebuild-route-offer" key={target.id}>
+                    <div>
+                      <strong>{displayKingdom(target).name}</strong>
+                      <span>{relationLabel(relation)} · {Math.floor(relation)}</span>
+                    </div>
+                    <button
+                      disabled={blockedByWar}
+                      onClick={() => onSendAction('market:createRoute', { kingdomId: kingdom.id, partnerKingdomId: target.id, resource: 'food', direction: 'import', amount: 18 })}
+                    >
+                      Импорт еды
+                    </button>
+                    <button
+                      disabled={blockedByWar}
+                      onClick={() => onSendAction('market:createRoute', { kingdomId: kingdom.id, partnerKingdomId: target.id, resource: kingdom.resources.wood > kingdom.resources.stone ? 'wood' : 'stone', direction: 'export', amount: 16 })}
+                    >
+                      Экспорт сырья
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="rebuild-workspace-card">
+            <div className="rebuild-card-title">
               <strong>Решения двора</strong>
               <span>быстрые меры правителя</span>
             </div>
@@ -1357,25 +1576,67 @@ function MainWorkspace({
               {world.kingdoms.filter((target) => target.id !== kingdom.id).map((target) => {
                 const relation = world.diplomacy.relations[kingdom.id]?.[target.id] ?? 50;
                 const tradeTreatyActive = hasTreaty(world, kingdom.id, target.id, 'trade');
+                const peaceTreatyActive = hasTreaty(world, kingdom.id, target.id, 'non_aggression');
+                const researchTreatyActive = hasTreaty(world, kingdom.id, target.id, 'research');
+                const allianceTreatyActive = hasTreaty(world, kingdom.id, target.id, 'alliance');
+                const isVassal = world.diplomacy.vassals?.[target.id] === kingdom.id;
+                const targetOverlord = overlordFor(world, target.id);
+                const atWar = !!activeWarBetween(world, kingdom.id, target.id);
                 return (
-                  <article className="rebuild-relation-row" key={target.id}>
+                  <article className="rebuild-relation-row rebuild-relation-row-expanded" key={target.id}>
                     <div>
                       <strong>{displayKingdom(target).name}</strong>
-                      <span>{relationLabel(relation)} · {Math.floor(relation)}</span>
+                      <span>
+                        {isVassal
+                          ? 'ваш вассал'
+                          : targetOverlord
+                            ? `вассал ${displayKingdom(targetOverlord).name}`
+                            : atWar
+                              ? 'идёт война'
+                              : relationLabel(relation)}
+                        {' · '}
+                        {Math.floor(relation)}
+                      </span>
                     </div>
                     <meter min={0} max={100} value={relation} />
-                    <button onClick={() => onSendAction('diplomacy:improveRelations', { fromKingdomId: kingdom.id, toKingdomId: target.id })}>
-                      Посольство
-                    </button>
-                    <button onClick={() => onSendAction('diplomacy:sendResources', { fromKingdomId: kingdom.id, toKingdomId: target.id, resource: 'food', amount: 50 })}>
-                      Караван
-                    </button>
-                    <button
-                      disabled={tradeTreatyActive}
-                      onClick={() => onSendAction('diplomacy:proposeTreaty', { fromKingdomId: kingdom.id, toKingdomId: target.id, treatyType: 'trade' })}
-                    >
-                      {tradeTreatyActive ? 'Действует' : 'Договор'}
-                    </button>
+                    <div className="rebuild-relation-actions">
+                      <button onClick={() => onSendAction('diplomacy:improveRelations', { fromKingdomId: kingdom.id, toKingdomId: target.id })}>
+                        Посольство
+                      </button>
+                      <button onClick={() => onSendAction('diplomacy:sendResources', { fromKingdomId: kingdom.id, toKingdomId: target.id, resource: 'food', amount: 50 })}>
+                        Караван
+                      </button>
+                      <button
+                        disabled={tradeTreatyActive || atWar}
+                        onClick={() => onSendAction('diplomacy:proposeTreaty', { fromKingdomId: kingdom.id, toKingdomId: target.id, treatyType: 'trade' })}
+                      >
+                        {tradeTreatyActive ? 'Торг.' : 'Торговля'}
+                      </button>
+                      <button
+                        disabled={peaceTreatyActive || atWar}
+                        onClick={() => onSendAction('diplomacy:proposeTreaty', { fromKingdomId: kingdom.id, toKingdomId: target.id, treatyType: 'non_aggression' })}
+                      >
+                        {peaceTreatyActive ? 'Пакт' : 'Ненапад.'}
+                      </button>
+                      <button
+                        disabled={researchTreatyActive || atWar}
+                        onClick={() => onSendAction('diplomacy:proposeTreaty', { fromKingdomId: kingdom.id, toKingdomId: target.id, treatyType: 'research' })}
+                      >
+                        {researchTreatyActive ? 'Наука' : 'Учёные'}
+                      </button>
+                      <button
+                        disabled={allianceTreatyActive || atWar}
+                        onClick={() => onSendAction('diplomacy:proposeTreaty', { fromKingdomId: kingdom.id, toKingdomId: target.id, treatyType: 'alliance' })}
+                      >
+                        {allianceTreatyActive ? 'Союз' : 'Союз'}
+                      </button>
+                      <button
+                        disabled={isVassal || atWar}
+                        onClick={() => onSendAction('diplomacy:demandVassalage', { fromKingdomId: kingdom.id, toKingdomId: target.id })}
+                      >
+                        Вассалитет
+                      </button>
+                    </div>
                   </article>
                 );
               })}
@@ -1410,6 +1671,19 @@ function MainWorkspace({
                   </div>
                 </article>
               )}
+              <div className="rebuild-vassal-board">
+                <div>
+                  <strong>Вассальная сеть</strong>
+                  <span>
+                    {overlord
+                      ? `Вы под клятвой: ${displayKingdom(overlord).name}`
+                      : vassals.length
+                        ? `Подчинены: ${vassals.map((item) => displayKingdom(item).name).join(', ')}`
+                        : 'Клятв пока нет'}
+                  </span>
+                </div>
+                <b>{vassals.length} / {world.kingdoms.length - 1}</b>
+              </div>
               <button className="rebuild-large-action" onClick={() => onOpenMainPanel('map')}>
                 <img src="/assets/ui/icon-map.png" alt="" />
                 <span>
@@ -1475,6 +1749,45 @@ function MainWorkspace({
 
           <section className="rebuild-workspace-card">
             <div className="rebuild-card-title">
+              <strong>Кампании и цель</strong>
+              <span>{world.victory?.completed ? 'мир подчинён' : `вассалов ${vassals.length}/${world.kingdoms.length - 1}`}</span>
+            </div>
+            <div className="rebuild-war-board">
+              {activeWars.map((war) => {
+                const enemy = world.kingdoms.find((item) => item.id === warEnemyId(war, kingdom.id));
+                const score = warScoreFor(war, kingdom.id);
+                return (
+                  <article className="rebuild-war-row" key={war.id}>
+                    <img src={kingdomAssets(enemy)?.crest ?? eventIcons.army} alt="" />
+                    <div>
+                      <strong>{displayKingdom(enemy).name}</strong>
+                      <span>день {war.days} · счёт {Math.floor(score)} · при нуле стабильности проигравший станет вассалом</span>
+                      <meter min={-100} max={100} value={score} />
+                    </div>
+                    <b>{score >= 0 ? 'нажим' : 'оборона'}</b>
+                  </article>
+                );
+              })}
+              {!activeWars.length && (
+                <article className="rebuild-war-row">
+                  <img src="/assets/events/event-army.png" alt="" />
+                  <div>
+                    <strong>Кампаний нет</strong>
+                    <span>Выберите цель ниже: война ежедневно тратит солдат и еду.</span>
+                    <meter min={-100} max={100} value={0} />
+                  </div>
+                  <b>мир</b>
+                </article>
+              )}
+              <div className="rebuild-war-goal">
+                <strong>Цель MVP</strong>
+                <span>Вассализировать все державы через победу в войне или дипломатическое давление.</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="rebuild-workspace-card">
+            <div className="rebuild-card-title">
               <strong>Оборона державы</strong>
               <span>свои регионы</span>
             </div>
@@ -1504,6 +1817,8 @@ function MainWorkspace({
             <div className="rebuild-target-board">
               {targetRegions.map((region) => {
                 const owner = world.kingdoms.find((item) => item.id === region.kingdomId);
+                const war = owner ? activeWarBetween(world, kingdom.id, owner.id) : undefined;
+                const isVassal = owner ? world.diplomacy.vassals?.[owner.id] === kingdom.id : false;
                 return (
                   <article className="rebuild-target-row" key={region.id}>
                     <div>
@@ -1511,6 +1826,12 @@ function MainWorkspace({
                       <span>{displayKingdom(owner).name} · {displayTerrain(region.terrain)} · форт {region.fortLevel}</span>
                     </div>
                     <b>{Math.floor(region.control)}%</b>
+                    <button
+                      disabled={!owner || !!war || isVassal}
+                      onClick={() => owner && onSendAction('war:declare', { attackerKingdomId: kingdom.id, defenderKingdomId: owner.id })}
+                    >
+                      {war ? 'Война' : 'Объявить'}
+                    </button>
                     <button onClick={() => onSendAction('army:raid', { kingdomId: kingdom.id, targetRegionId: region.id })}>
                       Рейд
                     </button>
@@ -1524,41 +1845,94 @@ function MainWorkspace({
 
       {panel === 'technology' && (
         <div className="rebuild-workspace-grid technology-workspace">
-          <section className="rebuild-workspace-card">
+          <section className="rebuild-workspace-card rebuild-tech-tree-card">
             <div className="rebuild-card-title">
-              <strong>Исследовательский фокус</strong>
-              <span>текущий прогресс: {formatNumber(kingdom.resources.technology)}</span>
+              <strong>Дерево технологий</strong>
+              <span>{completedCount}/{techTree.length} изучено · мощность {researchPower.toFixed(2)}/день</span>
             </div>
-            <div className="rebuild-tech-focus">
-              {(['stewardship', 'engineering', 'military'] as Kingdom['policies']['research'][]).map((value) => (
-                <button
-                  className={kingdom.policies.research === value ? 'rebuild-policy-option rebuild-policy-option-active' : 'rebuild-policy-option'}
-                  key={value}
-                  onClick={() => onSendAction('policy:set', { kingdomId: kingdom.id, policy: 'research', value })}
-                >
-                  <img src={value === 'military' ? '/assets/ui/icon-army.png' : value === 'engineering' ? '/assets/ui/icon-buildings.png' : '/assets/ui/icon-summary.png'} alt="" />
-                  <span>
-                    <strong>{policyLabels[value]}</strong>
-                    <small>{value === 'engineering' ? '+2 технологии в день' : value === 'military' ? 'бонус к росту армии' : 'стабильное управление'}</small>
-                  </span>
-                </button>
-              ))}
-              <button className="rebuild-large-action" onClick={() => onSendAction('technology:fundResearch', { kingdomId: kingdom.id })}>
-                <img src={RESOURCE_ICONS.technology} alt="" />
+            <div className="rebuild-tech-tree">
+              <div className="rebuild-active-research">
+                <img src={activeResearchTech ? techBranchIcons[activeResearchTech.branch] ?? RESOURCE_ICONS.technology : RESOURCE_ICONS.technology} alt="" />
                 <span>
-                  <strong>Грант исследователям</strong>
-                  <small>75 золота · 10 влияния · мгновенный прогресс</small>
+                  <strong>{activeResearchTech ? activeResearchTech.name : 'Архивы свободны'}</strong>
+                  <small>
+                    {activeResearch && activeResearchTech
+                      ? `прогресс ${Math.floor(activeResearch.progress)}/${activeResearch.required} · осталось ${Math.max(1, Math.ceil((activeResearch.required - activeResearch.progress) / Math.max(0.1, researchPower)))} дн.`
+                      : 'выберите доступную технологию ниже'}
+                  </small>
                 </span>
-              </button>
+                {activeResearch && (
+                  <meter min={0} max={activeResearch.required} value={activeResearch.progress} />
+                )}
+              </div>
+
+              {techBranches.map((branch) => (
+                <section className="rebuild-tech-branch" key={branch}>
+                  <header>
+                    <img src={techBranchIcons[branch] ?? RESOURCE_ICONS.technology} alt="" />
+                    <strong>{techBranchLabels[branch] ?? branch}</strong>
+                  </header>
+                  <div className="rebuild-tech-nodes">
+                    {techTree.filter((tech) => tech.branch === branch).sort((a, b) => a.tier - b.tier).map((tech) => {
+                      const status = techStatus(world, kingdom, tech);
+                      const missing = missingRequirements(world, kingdom, tech);
+                      const isClickable = status === 'available';
+                      return (
+                        <article className={`rebuild-tech-node rebuild-tech-node-${status}`} key={tech.id}>
+                          <div>
+                            <strong>{tech.name}</strong>
+                            <span>уровень {tech.tier} · {techStatusLabel(status)}</span>
+                          </div>
+                          <p>{tech.description}</p>
+                          <small>
+                            {missing.length
+                              ? `требуется: ${missing.join(', ')}`
+                              : `${tech.baseDays} дн. базы · ${formatCost(tech.cost)}`}
+                          </small>
+                          <button
+                            disabled={!isClickable}
+                            onClick={() => onSendAction('technology:startResearch', { kingdomId: kingdom.id, techId: tech.id })}
+                          >
+                            {status === 'completed' ? 'Изучено' : status === 'active' ? 'В работе' : status === 'locked' ? 'Закрыто' : 'Исследовать'}
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
           </section>
 
           <section className="rebuild-workspace-card">
             <div className="rebuild-card-title">
-              <strong>Законы короны</strong>
-              <span>налоги и военная доктрина</span>
+              <strong>Академия и законы</strong>
+              <span>резерв знаний: {formatNumber(kingdom.resources.technology)}</span>
             </div>
             <div className="rebuild-policy-groups">
+              <div className="rebuild-tech-focus">
+                {(['stewardship', 'engineering', 'military'] as Kingdom['policies']['research'][]).map((value) => (
+                  <button
+                    className={kingdom.policies.research === value ? 'rebuild-policy-option rebuild-policy-option-active' : 'rebuild-policy-option'}
+                    key={value}
+                    onClick={() => onSendAction('policy:set', { kingdomId: kingdom.id, policy: 'research', value })}
+                  >
+                    <img src={value === 'military' ? '/assets/ui/icon-army.png' : value === 'engineering' ? '/assets/ui/icon-buildings.png' : '/assets/ui/icon-summary.png'} alt="" />
+                    <span>
+                      <strong>{policyLabels[value]}</strong>
+                      <small>{value === 'engineering' ? '+мощность исследований от мастерских' : value === 'military' ? 'военные здания лучше помогают науке' : 'ровный дворцовый прогресс'}</small>
+                    </span>
+                  </button>
+                ))}
+                <button className="rebuild-large-action" onClick={() => onSendAction('technology:fundResearch', { kingdomId: kingdom.id })}>
+                  <img src={RESOURCE_ICONS.technology} alt="" />
+                  <span>
+                    <strong>Грант исследователям</strong>
+                    <small>75 золота · 10 влияния · ускоряет активный проект</small>
+                  </span>
+                </button>
+              </div>
+
               <div className="rebuild-policy-readout">
                 <Metric icon={RESOURCE_ICONS.gold} label="Налоги" value={policyLabels[kingdom.policies.taxation]} />
                 <Metric icon={RESOURCE_ICONS.army} label="Доктрина" value={policyLabels[kingdom.policies.military]} />

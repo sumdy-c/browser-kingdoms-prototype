@@ -157,6 +157,9 @@ export interface DiplomacyState {
     fromKingdomId: string;
     toKingdomId: string;
     type: string;
+    signedDay?: number;
+    signedYear?: number;
+    durationDays?: number;
   }>;
 }
 

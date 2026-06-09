@@ -8,6 +8,7 @@ interface CountryPanelProps {
   armies: Army[];
   selectedKingdomId?: string;
   selectedRegionId?: string;
+  controlledKingdomId?: string;
   onSelectKingdom: (kingdomId: string) => void;
   onSelectRegion: (regionId: string) => void;
   onOpenHolding: (holdingId: string) => void;
@@ -27,11 +28,13 @@ export function CountryPanel({
   armies,
   selectedKingdomId,
   selectedRegionId,
+  controlledKingdomId,
   onSelectKingdom,
   onSelectRegion,
   onOpenHolding,
 }: CountryPanelProps) {
   const selectedKingdom = kingdoms.find((kingdom) => kingdom.id === selectedKingdomId) ?? kingdoms[0];
+  const controlledKingdom = kingdoms.find((kingdom) => kingdom.id === controlledKingdomId) ?? selectedKingdom;
   const selectedAssets = selectedKingdom ? KINGDOM_ASSETS[selectedKingdom.id as keyof typeof KINGDOM_ASSETS] : undefined;
   const selectedRegions = selectedKingdom ? regions.filter((region) => region.kingdomId === selectedKingdom.id) : [];
   const selectedRegion = regions.find((region) => region.id === selectedRegionId) ?? selectedRegions[0];
@@ -43,6 +46,10 @@ export function CountryPanel({
       <section className="ornate-panel kingdom-card-panel">
         {selectedKingdom && selectedAssets && (
           <>
+            <div className="rule-banner">
+              <span>{selectedKingdom.id === controlledKingdom?.id ? 'Вы правите' : 'Осмотр державы'}</span>
+              <strong>{selectedKingdom.id === controlledKingdom?.id ? selectedKingdom.name : controlledKingdom?.name}</strong>
+            </div>
             <div className="kingdom-card-art" style={{ backgroundImage: `url(${selectedAssets.card})` }}>
               <span />
               <img src={selectedAssets.crest} alt="" />
@@ -53,6 +60,14 @@ export function CountryPanel({
                 <span>{selectedKingdom.title}</span>
               </div>
               <img src={selectedAssets.ruler} alt="" />
+            </div>
+            <div className="ruler-card">
+              <img src={selectedAssets.ruler} alt="" />
+              <div>
+                <span>Правитель</span>
+                <strong>{selectedKingdom.ruler}</strong>
+                <small>{selectedKingdom.policies.taxation} taxes · {selectedKingdom.policies.military} doctrine</small>
+              </div>
             </div>
             <p className="motto">"{selectedKingdom.motto}"</p>
             <div className="trait-row">
@@ -81,7 +96,7 @@ export function CountryPanel({
                 <img src={assets.crest} alt="" />
                 <span>
                   <strong>{kingdom.name}</strong>
-                  <small>{kingdom.ruler}</small>
+                  <small>{kingdom.id === controlledKingdom?.id ? 'ваша держава' : kingdom.ruler}</small>
                 </span>
               </button>
             );

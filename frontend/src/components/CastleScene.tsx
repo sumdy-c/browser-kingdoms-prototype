@@ -1,19 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { BuildRequest, BuildingCatalogItem, BuildingType, Castle, CoreResourceKey, Country, ResourceKey, Resources } from '../types';
 import {
-  ArcRotateCamera,
-  Color3,
-  Color4,
-  Engine,
-  HemisphericLight,
-  Mesh,
-  MeshBuilder,
-  PointerEventTypes,
-  Scene,
-  StandardMaterial,
-  Vector3,
-} from '@babylonjs/core';
-import type { BuildRequest, Building, BuildingCatalogItem, BuildingType, Castle, Country, Resources } from '../types';
-import { BUILDING_LABELS } from '../types';
+  BUILDING_ASSETS,
+  BUILDING_LABELS,
+  BUILDING_PREVIEWS,
+  RESOURCE_ICONS,
+  RESOURCE_LABELS,
+} from '../types';
 
 interface CastleSceneProps {
   castle: Castle;
@@ -23,342 +16,326 @@ interface CastleSceneProps {
   onBuild: (request: BuildRequest) => void;
 }
 
-const buildingTypes = Object.keys(BUILDING_LABELS) as BuildingType[];
+const buildingOrder: BuildingType[] = [
+  'house',
+  'farm',
+  'lumberyard',
+  'quarry',
+  'warehouse',
+  'market',
+  'barracks',
+  'archeryRange',
+  'watchtower',
+];
 
-const materialColors: Record<BuildingType | 'ground' | 'grid' | 'wall', Color3> = {
-  house: new Color3(0.65, 0.49, 0.32),
-  farm: new Color3(0.38, 0.62, 0.31),
-  warehouse: new Color3(0.55, 0.46, 0.36),
-  lumberyard: new Color3(0.45, 0.28, 0.13),
-  quarry: new Color3(0.42, 0.45, 0.49),
-  market: new Color3(0.73, 0.52, 0.24),
-  barracks: new Color3(0.55, 0.19, 0.18),
-  archeryRange: new Color3(0.34, 0.48, 0.24),
-  watchtower: new Color3(0.45, 0.45, 0.52),
-  ground: new Color3(0.22, 0.3, 0.24),
-  grid: new Color3(0.75, 0.75, 0.65),
-  wall: new Color3(0.36, 0.36, 0.4),
+const resourceOrder: ResourceKey[] = ['gold', 'food', 'wood', 'stone', 'iron', 'influence', 'population', 'army'];
+
+const categoryLabels: Record<string, string> = {
+  defense: 'Оборона',
+  food: 'Еда',
+  logistics: 'Логистика',
+  military: 'Армия',
+  production: 'Производство',
+  settlement: 'Поселение',
+  trade: 'Торговля',
 };
 
-function formatCost(cost: Partial<Resources>) {
-  const labels = {
-    gold: 'зол',
-    food: 'еды',
-    wood: 'дер',
-    stone: 'кам',
-    iron: 'жел',
-    population: 'нас',
-  };
+const buildingDescriptions: Record<BuildingType, string> = {
+  house: 'Увеличивает население и даёт основу для роста владения.',
+  farm: 'Кормит людей, поддерживает гарнизон и стабилизирует провинцию.',
+  lumberyard: 'Даёт дерево для дальнейшей стройки и ремонта укреплений.',
+  quarry: 'Добывает камень для стен, складов и тяжёлой инфраструктуры.',
+  warehouse: 'Расширяет строительный лимит и повышает устойчивость запасов.',
+  market: 'Усиливает денежный поток и торговое влияние владения.',
+  barracks: 'Готовит пехоту и укрепляет военное присутствие.',
+  archeryRange: 'Усиливает армию лучниками и подготовленными ополченцами.',
+  watchtower: 'Снижает угрозу, повышает контроль и помогает пережить набеги.',
+};
 
-  return Object.entries(cost)
-    .map(([key, value]) => `${value} ${labels[key as keyof typeof labels]}`)
-    .join(' · ');
+const holdingKindLabels: Record<Castle['kind'], string> = {
+  capital: 'Столица',
+  castle: 'Замок',
+  city: 'Город',
+  farm: 'Фермы',
+  mine: 'Рудники',
+  forest: 'Леса',
+};
+
+function formatNumber(value: number) {
+  return Math.floor(value).toLocaleString('ru-RU');
 }
 
-function canAfford(resources: Resources | undefined, cost: Partial<Resources>) {
+function canAfford(resources: Resources | undefined, cost: Partial<Record<CoreResourceKey, number>>) {
   if (!resources) {
     return false;
   }
 
-  return Object.entries(cost).every(([key, value]) => resources[key as keyof Resources] >= (value ?? 0));
+  return Object.entries(cost).every(([key, value]) => resources[key as CoreResourceKey] >= (value ?? 0));
 }
 
-function createMaterial(scene: Scene, name: string, color: Color3) {
-  const material = new StandardMaterial(name, scene);
-  material.diffuseColor = color;
-  material.specularColor = new Color3(0.12, 0.12, 0.12);
-  return material;
+function formatSigned(value: number) {
+  return `${value > 0 ? '+' : ''}${value}`;
 }
 
-function applyQueuedPreview(root: Mesh, building: Building) {
-  if (building.status !== 'queued') {
-    return;
+function formatList<T extends string>(
+  values: Partial<Record<T, number>> | undefined,
+  labels: Record<T, string>,
+  icons?: Partial<Record<T, string>>,
+) {
+  if (!values) {
+    return [];
   }
 
-  root.getChildMeshes().forEach((mesh) => {
-    mesh.visibility = 0.46;
-  });
+  return Object.entries(values)
+    .filter(([, value]) => typeof value === 'number' && value !== 0)
+    .map(([key, value]) => ({
+      key,
+      label: labels[key as T],
+      icon: icons?.[key as T],
+      value: value as number,
+    }));
 }
 
-function createBuilding(scene: Scene, building: Building, parent: Mesh, materials: Record<string, StandardMaterial>, index: number) {
-  const root = new Mesh(`building-root-${building.id}`, scene);
-  const fallbackX = -5 + (index % 6) * 2;
-  const fallbackZ = -3 + Math.floor(index / 6) * 2;
-  root.parent = parent;
-  root.position = new Vector3(typeof building.x === 'number' ? building.x : fallbackX, 0, typeof building.z === 'number' ? building.z : fallbackZ);
-  root.rotation.y = building.rotation ?? 0;
-
-  if (building.type === 'watchtower') {
-    const tower = MeshBuilder.CreateCylinder(`tower-${building.id}`, { diameter: 0.9, height: 2.8, tessellation: 16 }, scene);
-    tower.parent = root;
-    tower.position.y = 1.4;
-    tower.material = materials.watchtower;
-
-    const roof = MeshBuilder.CreateCylinder(`tower-roof-${building.id}`, { diameterTop: 0, diameterBottom: 1.25, height: 0.85, tessellation: 16 }, scene);
-    roof.parent = root;
-    roof.position.y = 3.2;
-    roof.material = materials.house;
-    applyQueuedPreview(root, building);
-    return root;
-  }
-
-  if (building.type === 'farm') {
-    const field = MeshBuilder.CreateBox(`farm-field-${building.id}`, { width: 2.4, height: 0.08, depth: 1.8 }, scene);
-    field.parent = root;
-    field.position.y = 0.04;
-    field.material = materials.farm;
-
-    const barn = MeshBuilder.CreateBox(`farm-barn-${building.id}`, { width: 1.1, height: 0.7, depth: 0.9 }, scene);
-    barn.parent = root;
-    barn.position = new Vector3(-0.55, 0.42, 0);
-    barn.material = materials.house;
-    applyQueuedPreview(root, building);
-    return root;
-  }
-
-  const sizes: Record<BuildingType, { width: number; height: number; depth: number }> = {
-    house: { width: 1.2, height: 0.9, depth: 1.1 },
-    farm: { width: 1.6, height: 0.6, depth: 1.2 },
-    warehouse: { width: 1.8, height: 1.1, depth: 1.35 },
-    lumberyard: { width: 1.7, height: 0.7, depth: 1.2 },
-    quarry: { width: 1.4, height: 0.75, depth: 1.4 },
-    market: { width: 1.8, height: 0.9, depth: 1.6 },
-    barracks: { width: 2.2, height: 1.0, depth: 1.1 },
-    archeryRange: { width: 2.2, height: 0.7, depth: 1.4 },
-    watchtower: { width: 1, height: 2.2, depth: 1 },
-  };
-
-  const size = sizes[building.type];
-  const body = MeshBuilder.CreateBox(`body-${building.id}`, size, scene);
-  body.parent = root;
-  body.position.y = size.height / 2;
-  body.material = materials[building.type];
-
-  if (building.type === 'house' || building.type === 'warehouse' || building.type === 'barracks' || building.type === 'market') {
-    const roof = MeshBuilder.CreateCylinder(`roof-${building.id}`, {
-      diameter: Math.max(size.width, size.depth) * 1.15,
-      height: 0.65,
-      tessellation: 3,
-    }, scene);
-    roof.parent = root;
-    roof.position.y = size.height + 0.35;
-    roof.rotation.z = Math.PI / 2;
-    roof.material = materials.house;
-  }
-
-  if (building.type === 'lumberyard') {
-    for (let i = 0; i < 4; i += 1) {
-      const log = MeshBuilder.CreateCylinder(`log-${building.id}-${i}`, { diameter: 0.18, height: 1.6, tessellation: 8 }, scene);
-      log.parent = root;
-      log.position = new Vector3(-0.45 + i * 0.3, 0.2, 0.75);
-      log.rotation.z = Math.PI / 2;
-      log.material = materials.house;
-    }
-  }
-
-  if (building.type === 'quarry') {
-    for (let i = 0; i < 5; i += 1) {
-      const stone = MeshBuilder.CreateSphere(`stone-${building.id}-${i}`, { diameter: 0.25 + i * 0.03, segments: 8 }, scene);
-      stone.parent = root;
-      stone.position = new Vector3(-0.6 + i * 0.3, 0.16, 0.65 - (i % 2) * 0.3);
-      stone.material = materials.quarry;
-    }
-  }
-
-  if (building.type === 'archeryRange') {
-    for (let i = 0; i < 5; i += 1) {
-      const target = MeshBuilder.CreateCylinder(`target-${building.id}-${i}`, { diameter: 0.28, height: 0.08, tessellation: 16 }, scene);
-      target.parent = root;
-      target.position = new Vector3(-0.8 + i * 0.4, 0.45, 0.72);
-      target.rotation.x = Math.PI / 2;
-      target.material = materials.barracks;
-    }
-  }
-
-  applyQueuedPreview(root, building);
-  return root;
+function getBuildingCount(castle: Castle, type: BuildingType) {
+  return castle.buildings.filter((building) => building.type === type).length;
 }
 
 export function CastleScene({ castle, country, buildingCatalog, onBack, onBuild }: CastleSceneProps) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const sceneRef = useRef<Scene | null>(null);
-  const buildingsRootRef = useRef<Mesh | null>(null);
   const [selectedType, setSelectedType] = useState<BuildingType>('house');
-  const selectedTypeRef = useRef<BuildingType>('house');
+  const selectedCatalog = buildingCatalog[selectedType];
+  const activeAndQueued = castle.buildings.length + castle.constructionQueue.length;
+  const buildLimit = country?.resources.buildLimit ?? 0;
+  const slotsLeft = Math.max(0, buildLimit - activeAndQueued);
+  const selectedAffordable = canAfford(country?.resources, selectedCatalog.cost);
+  const canQueueSelected = selectedAffordable && slotsLeft > 0;
 
-  const selectedCost = useMemo(() => buildingCatalog[selectedType].cost, [buildingCatalog, selectedType]);
-  const hasResources = canAfford(country?.resources, selectedCost);
+  const activeByType = useMemo(() => (
+    buildingOrder
+      .map((type) => ({ type, count: getBuildingCount(castle, type), catalog: buildingCatalog[type] }))
+      .filter((item) => item.count > 0)
+  ), [buildingCatalog, castle]);
 
-  useEffect(() => {
-    selectedTypeRef.current = selectedType;
-  }, [selectedType]);
+  const queueByType = useMemo(() => (
+    castle.constructionQueue.map((building) => ({
+      ...building,
+      catalog: buildingCatalog[building.type],
+    }))
+  ), [buildingCatalog, castle.constructionQueue]);
 
-  const renderBuildings = useCallback(() => {
-    const scene = sceneRef.current;
-    const root = buildingsRootRef.current;
-
-    if (!scene || !root) {
+  const buildSelected = () => {
+    if (!canQueueSelected) {
       return;
     }
 
-    root.getChildren().forEach((node) => node.dispose());
-
-    const materials = {
-      house: createMaterial(scene, 'mat-house', materialColors.house),
-      farm: createMaterial(scene, 'mat-farm', materialColors.farm),
-      warehouse: createMaterial(scene, 'mat-warehouse', materialColors.warehouse),
-      lumberyard: createMaterial(scene, 'mat-lumberyard', materialColors.lumberyard),
-      quarry: createMaterial(scene, 'mat-quarry', materialColors.quarry),
-      market: createMaterial(scene, 'mat-market', materialColors.market),
-      barracks: createMaterial(scene, 'mat-barracks', materialColors.barracks),
-      archeryRange: createMaterial(scene, 'mat-archery-range', materialColors.archeryRange),
-      watchtower: createMaterial(scene, 'mat-watchtower', materialColors.watchtower),
-    };
-
-    const visibleBuildings = [...castle.buildings, ...castle.constructionQueue];
-    visibleBuildings.forEach((building, index) => createBuilding(scene, building, root, materials, index));
-  }, [castle.buildings, castle.constructionQueue]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
-
-    const engine = new Engine(canvas, true, { alpha: true, preserveDrawingBuffer: true, stencil: true });
-    const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.05, 0.07, 0.1, 0);
-
-    const camera = new ArcRotateCamera('camera', -Math.PI / 2.4, Math.PI / 2.8, 20, new Vector3(0, 0, 0), scene);
-    camera.attachControl(canvas, true);
-    camera.lowerRadiusLimit = 9;
-    camera.upperRadiusLimit = 35;
-    camera.wheelPrecision = 45;
-
-    new HemisphericLight('light', new Vector3(0.2, 1, 0.4), scene).intensity = 0.9;
-
-    const groundMaterial = createMaterial(scene, 'ground-material', materialColors.ground);
-    const wallMaterial = createMaterial(scene, 'wall-material', materialColors.wall);
-    const gridMaterial = createMaterial(scene, 'grid-material', materialColors.grid);
-    groundMaterial.alpha = 0.92;
-    gridMaterial.alpha = 0.35;
-
-    const ground = MeshBuilder.CreateGround('build-ground', { width: 16, height: 16 }, scene);
-    ground.material = groundMaterial;
-
-    const wallA = MeshBuilder.CreateBox('wall-north', { width: 16.5, height: 1.2, depth: 0.35 }, scene);
-    wallA.position = new Vector3(0, 0.6, -8.25);
-    wallA.material = wallMaterial;
-    const wallB = wallA.clone('wall-south');
-    wallB.position.z = 8.25;
-    const wallC = MeshBuilder.CreateBox('wall-west', { width: 0.35, height: 1.2, depth: 16.5 }, scene);
-    wallC.position = new Vector3(-8.25, 0.6, 0);
-    wallC.material = wallMaterial;
-    const wallD = wallC.clone('wall-east');
-    wallD.position.x = 8.25;
-
-    for (let i = -8; i <= 8; i += 1) {
-      const lineX = MeshBuilder.CreateLines(`grid-x-${i}`, { points: [new Vector3(i, 0.03, -8), new Vector3(i, 0.03, 8)] }, scene);
-      lineX.color = materialColors.grid;
-      const lineZ = MeshBuilder.CreateLines(`grid-z-${i}`, { points: [new Vector3(-8, 0.03, i), new Vector3(8, 0.03, i)] }, scene);
-      lineZ.color = materialColors.grid;
-    }
-
-    const root = new Mesh('buildings-root', scene);
-    buildingsRootRef.current = root;
-    sceneRef.current = scene;
-
-    scene.onPointerObservable.add((eventData) => {
-      if (eventData.type !== PointerEventTypes.POINTERPICK) {
-        return;
-      }
-
-      const pick = eventData.pickInfo;
-      if (!pick?.hit || pick.pickedMesh?.name !== 'build-ground' || !pick.pickedPoint) {
-        return;
-      }
-
-      const x = Math.round(pick.pickedPoint.x);
-      const z = Math.round(pick.pickedPoint.z);
-
-      if (Math.abs(x) > 7 || Math.abs(z) > 7) {
-        return;
-      }
-
-      onBuild({
-        castleId: castle.id,
-        holdingId: castle.id,
-        type: selectedTypeRef.current,
-        x,
-        z,
-        rotation: 0,
-      });
+    onBuild({
+      holdingId: castle.id,
+      castleId: castle.id,
+      type: selectedType,
     });
-
-    engine.runRenderLoop(() => scene.render());
-
-    const resize = () => engine.resize();
-    window.addEventListener('resize', resize);
-
-    return () => {
-      window.removeEventListener('resize', resize);
-      scene.dispose();
-      engine.dispose();
-      sceneRef.current = null;
-      buildingsRootRef.current = null;
-    };
-  }, [castle.id, onBuild]);
-
-  useEffect(() => {
-    renderBuildings();
-  }, [renderBuildings]);
+  };
 
   return (
-    <div className="castle-screen">
-      <div className="castle-topbar">
-        <button className="secondary-button" onClick={onBack}>← На карту</button>
-        <div>
-          <strong>{castle.name}</strong>
-          <span>{country ? country.name : 'Нейтральная область'} · {castle.buildings.length} построек</span>
-        </div>
-      </div>
+    <div className="castle-2d-screen">
+      <header className="castle-2d-topbar">
+        <button className="castle-back-button" onClick={onBack}>
+          <img src="/assets/ui/icon-back.png" alt="" />
+          На карту
+        </button>
 
-      <div className="castle-layout">
-        <aside className="build-panel">
-          <div className="panel-title">Строительство</div>
-          <div className="build-list">
-            {buildingTypes.map((type) => {
-              const affordable = canAfford(country?.resources, buildingCatalog[type].cost);
+        <div className="castle-title-block">
+          <span>{country?.name ?? 'Нейтральное владение'}</span>
+          <strong>{castle.name}</strong>
+          <small>{holdingKindLabels[castle.kind]} · гарнизон {formatNumber(castle.garrison)}</small>
+        </div>
+
+        <div className="castle-capacity">
+          <span>Строительный лимит</span>
+          <strong>{activeAndQueued} / {buildLimit}</strong>
+          <small>{slotsLeft > 0 ? `свободно ${slotsLeft}` : 'лимит достигнут'}</small>
+        </div>
+      </header>
+
+      <section className="castle-resource-strip">
+        {country && resourceOrder.map((resource) => (
+          <div className="castle-resource-chip" key={resource}>
+            <img src={RESOURCE_ICONS[resource]} alt="" />
+            <span>{RESOURCE_LABELS[resource]}</span>
+            <strong>{formatNumber(country.resources[resource])}</strong>
+          </div>
+        ))}
+      </section>
+
+      <main className="castle-2d-layout">
+        <aside className="castle-status-panel">
+          <section className="castle-focus-card">
+            <img src={BUILDING_PREVIEWS[selectedType]} alt="" />
+            <span className="castle-focus-shade" />
+            <div className="castle-focus-content">
+              <img src={BUILDING_ASSETS[selectedType]} alt="" />
+              <div>
+                <span>{categoryLabels[selectedCatalog.category] ?? selectedCatalog.category}</span>
+                <strong>{BUILDING_LABELS[selectedType]}</strong>
+                <small>{selectedCatalog.buildDays} дн. строительства</small>
+              </div>
+            </div>
+          </section>
+
+          <section className="castle-detail-card">
+            <p>{buildingDescriptions[selectedType]}</p>
+
+            <div className="castle-detail-group">
+              <strong>Стоимость</strong>
+              <ResourcePills values={selectedCatalog.cost} signed={false} />
+            </div>
+
+            <div className="castle-detail-group">
+              <strong>Эффект</strong>
+              <ResourcePills values={selectedCatalog.effects} signed />
+            </div>
+
+            {selectedCatalog.maintenance && (
+              <div className="castle-detail-group">
+                <strong>Содержание</strong>
+                <ResourcePills values={selectedCatalog.maintenance} signed />
+              </div>
+            )}
+
+            <button
+              className="castle-build-now"
+              disabled={!canQueueSelected}
+              onClick={buildSelected}
+            >
+              <img src="/assets/ui/icon-buildings.png" alt="" />
+              {slotsLeft <= 0 ? 'Лимит построек' : selectedAffordable ? 'Поставить в очередь' : 'Недостаточно ресурсов'}
+            </button>
+          </section>
+
+          <section className="castle-queue-panel">
+            <div className="castle-section-heading">
+              <strong>Очередь строительства</strong>
+              <span>{castle.constructionQueue.length}</span>
+            </div>
+
+            <div className="castle-queue-list">
+              {queueByType.length === 0 ? (
+                <div className="castle-empty-state">Очередь свободна</div>
+              ) : (
+                queueByType.map((building) => (
+                  <div className="castle-queue-row" key={building.id}>
+                    <img src={BUILDING_ASSETS[building.type]} alt="" />
+                    <span>
+                      <strong>{BUILDING_LABELS[building.type]}</strong>
+                      <small>
+                        {categoryLabels[building.catalog.category] ?? building.catalog.category}
+                        {' · осталось '}
+                        {building.remainingDays} дн.
+                      </small>
+                    </span>
+                    <b>{building.remainingDays}</b>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </aside>
+
+        <section className="castle-catalog-panel">
+          <div className="castle-section-heading catalog-heading">
+            <div>
+              <strong>Постройки владения</strong>
+              <span>Выберите карточку и поставьте здание в очередь</span>
+            </div>
+            <b>{castle.buildings.length} активно</b>
+          </div>
+
+          <div className="castle-building-grid">
+            {buildingOrder.map((type) => {
+              const catalog = buildingCatalog[type];
+              const affordable = canAfford(country?.resources, catalog.cost);
+              const selected = selectedType === type;
+              const count = getBuildingCount(castle, type);
+              const blocked = !affordable || slotsLeft <= 0;
+
               return (
                 <button
-                  className={selectedType === type ? 'build-button build-button-active' : 'build-button'}
+                  className={[
+                    'castle-building-card',
+                    selected ? 'castle-building-card-selected' : '',
+                    blocked ? 'castle-building-card-blocked' : '',
+                  ].filter(Boolean).join(' ')}
                   key={type}
                   onClick={() => setSelectedType(type)}
                 >
-                  <strong>{BUILDING_LABELS[type]}</strong>
-                  <span>{formatCost(buildingCatalog[type].cost)}</span>
-                  {!affordable && <small>мало ресурсов</small>}
+                  <img className="castle-building-preview" src={BUILDING_PREVIEWS[type]} alt="" />
+                  <span className="castle-building-shade" />
+                  <span className="castle-building-count">{count > 0 ? `x${count}` : 'новое'}</span>
+
+                  <span className="castle-building-info">
+                    <img src={BUILDING_ASSETS[type]} alt="" />
+                    <span>
+                      <small>{categoryLabels[catalog.category] ?? catalog.category}</small>
+                      <strong>{BUILDING_LABELS[type]}</strong>
+                    </span>
+                  </span>
+
+                  <span className="castle-building-meta">
+                    <span>{catalog.buildDays} дн.</span>
+                    <span>{affordable ? 'доступно' : 'мало ресурсов'}</span>
+                  </span>
                 </button>
               );
             })}
           </div>
-          {castle.constructionQueue.length > 0 && (
-            <div className="build-queue">
-              <strong>Очередь</strong>
-              {castle.constructionQueue.map((building) => (
-                <span key={building.id}>
-                  {BUILDING_LABELS[building.type]} · {building.remainingDays} дн.
-                </span>
-              ))}
-            </div>
-          )}
-          <div className={hasResources ? 'hint' : 'hint hint-warning'}>
-            Выбрано: {BUILDING_LABELS[selectedType]}. Кликни по клетке внутри стен, чтобы построить.
+        </section>
+
+        <aside className="castle-built-panel">
+          <div className="castle-section-heading">
+            <strong>Уже построено</strong>
+            <span>{castle.buildings.length}</span>
+          </div>
+
+          <div className="castle-built-list">
+            {activeByType.length === 0 ? (
+              <div className="castle-empty-state">Построек пока нет</div>
+            ) : (
+              activeByType.map(({ type, count, catalog }) => (
+                <article className="castle-built-row" key={type}>
+                  <img src={BUILDING_ASSETS[type]} alt="" />
+                  <div>
+                    <strong>{BUILDING_LABELS[type]}</strong>
+                    <span>{categoryLabels[catalog.category] ?? catalog.category} · x{count}</span>
+                  </div>
+                </article>
+              ))
+            )}
           </div>
         </aside>
+      </main>
+    </div>
+  );
+}
 
-        <canvas className="castle-canvas" ref={canvasRef} />
-      </div>
+function ResourcePills({
+  values,
+  signed,
+}: {
+  values: Partial<Record<ResourceKey | CoreResourceKey, number>>;
+  signed: boolean;
+}) {
+  const pills = formatList(values, RESOURCE_LABELS, RESOURCE_ICONS);
+
+  if (!pills.length) {
+    return <span className="castle-muted">нет</span>;
+  }
+
+  return (
+    <div className="castle-resource-pills">
+      {pills.map((item) => (
+        <span className={item.value < 0 ? 'castle-pill castle-pill-negative' : 'castle-pill'} key={item.key}>
+          {item.icon && <img src={item.icon} alt="" />}
+          {item.label} {signed ? formatSigned(item.value) : item.value}
+        </span>
+      ))}
     </div>
   );
 }

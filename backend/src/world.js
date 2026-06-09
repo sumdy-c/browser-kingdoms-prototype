@@ -325,6 +325,8 @@ export function createInitialWorld(tickMs) {
       width: MAP_WIDTH,
       height: MAP_HEIGHT,
       image: '/assets/map/world-map-painted.png?v=20260609',
+      borders: '/assets/map/world-map-borders.png?v=20260609',
+      labels: '/assets/map/world-map-labels.png?v=20260609',
       minimap: '/assets/map/world-map-minimap.png?v=20260609',
     },
     kingdoms,
@@ -602,12 +604,36 @@ export function dispatchWorldAction(world, socketId, action = {}) {
     return improveRelations(world, socketId, payload);
   }
 
+  if (type === 'diplomacy:proposeTreaty') {
+    return proposeTreaty(world, socketId, payload);
+  }
+
   if (type === 'army:recruit') {
     return recruitArmy(world, socketId, payload);
   }
 
   if (type === 'army:raid') {
     return raidRegion(world, socketId, payload);
+  }
+
+  if (type === 'army:patrol') {
+    return patrolRegion(world, socketId, payload);
+  }
+
+  if (type === 'army:fortify') {
+    return fortifyRegion(world, socketId, payload);
+  }
+
+  if (type === 'kingdom:emergencyLevy') {
+    return emergencyLevy(world, socketId, payload);
+  }
+
+  if (type === 'kingdom:holdFestival') {
+    return holdFestival(world, socketId, payload);
+  }
+
+  if (type === 'technology:fundResearch') {
+    return fundResearch(world, socketId, payload);
   }
 
   if (type === 'policy:set') {
@@ -770,6 +796,64 @@ function improveRelations(world, socketId, payload) {
   return { ok: true };
 }
 
+function proposeTreaty(world, socketId, payload) {
+  const from = getActionKingdom(world, socketId, payload.fromKingdomId);
+  const to = world.kingdoms.find((item) => item.id === payload.toKingdomId);
+  const treatyType = ['trade', 'non_aggression', 'research'].includes(payload.treatyType) ? payload.treatyType : 'trade';
+  const treatyLabels = {
+    trade: 'торговое соглашение',
+    non_aggression: 'пакт о ненападении',
+    research: 'обмен учёными',
+  };
+  const relationNeeded = {
+    trade: 55,
+    non_aggression: 48,
+    research: 64,
+  };
+  const cost = {
+    trade: { influence: 16, gold: 40 },
+    non_aggression: { influence: 18, gold: 30 },
+    research: { influence: 22, gold: 55, technology: 12 },
+  }[treatyType];
+
+  if (!from || !to || from.id === to.id) {
+    return { ok: false, reason: 'Неверный адресат договора.' };
+  }
+
+  const relation = world.diplomacy.relations[from.id]?.[to.id] ?? 45;
+  if (relation < relationNeeded[treatyType]) {
+    return { ok: false, reason: 'Отношения слишком слабые для договора.' };
+  }
+
+  const duplicate = world.diplomacy.treaties.some((treaty) => (
+    treaty.type === treatyType
+    && [treaty.fromKingdomId, treaty.toKingdomId].includes(from.id)
+    && [treaty.fromKingdomId, treaty.toKingdomId].includes(to.id)
+  ));
+  if (duplicate) {
+    return { ok: false, reason: 'Такой договор уже действует.' };
+  }
+
+  if (!canAfford(from.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно ресурсов для договора.' };
+  }
+
+  payCost(from.resources, cost);
+  world.diplomacy.treaties.push({
+    id: `treaty-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    fromKingdomId: from.id,
+    toKingdomId: to.id,
+    type: treatyType,
+    signedDay: world.time.day,
+    signedYear: world.time.year,
+    durationDays: 72,
+  });
+
+  adjustRelation(world, from.id, to.id, treatyType === 'non_aggression' ? 10 : 7);
+  pushEvent(world, 'diplomacy', 'Договор заключён', `${from.name} и ${to.name} подписывают ${treatyLabels[treatyType]}.`, from.id, { influence: -cost.influence });
+  return { ok: true };
+}
+
 function recruitArmy(world, socketId, payload) {
   const kingdom = getActionKingdom(world, socketId, payload.kingdomId);
 
@@ -845,6 +929,140 @@ function raidRegion(world, socketId, payload) {
   return { ok: true };
 }
 
+function patrolRegion(world, socketId, payload) {
+  const kingdom = getActionKingdom(world, socketId, payload.kingdomId);
+  const region = world.regions.find((item) => item.id === payload.regionId)
+    ?? world.regions.find((item) => item.id === kingdom?.capitalRegionId);
+
+  if (!kingdom || !region || region.kingdomId !== kingdom.id) {
+    return { ok: false, reason: 'Можно патрулировать только свой регион.' };
+  }
+
+  const cost = { gold: 22, food: 24 };
+  if (!canAfford(kingdom.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно припасов для патруля.' };
+  }
+
+  payCost(kingdom.resources, cost);
+  region.control = clampNumber(region.control + 6, 20, 100);
+  region.prosperity = clampNumber((region.prosperity ?? region.development) + 1, 20, 100);
+  kingdom.resources.threat = clampNumber(kingdom.resources.threat - 7, 0, 100);
+  kingdom.resources.stability = clampNumber(kingdom.resources.stability + 1, 0, 100);
+
+  const army = world.armies.find((item) => item.kingdomId === kingdom.id);
+  if (army) {
+    army.regionId = region.id;
+    army.status = 'patrolling';
+    army.morale = clampNumber(army.morale + 3, 20, 100);
+  }
+
+  pushEvent(world, 'army', 'Патруль дорог', `${kingdom.name}: отряды прочёсывают ${region.name}. Контроль растёт, угроза снижается.`, kingdom.id);
+  return { ok: true };
+}
+
+function fortifyRegion(world, socketId, payload) {
+  const kingdom = getActionKingdom(world, socketId, payload.kingdomId);
+  const region = world.regions.find((item) => item.id === payload.regionId)
+    ?? world.regions.find((item) => item.id === kingdom?.capitalRegionId);
+
+  if (!kingdom || !region || region.kingdomId !== kingdom.id) {
+    return { ok: false, reason: 'Можно укреплять только свой регион.' };
+  }
+
+  if (region.fortLevel >= 6) {
+    return { ok: false, reason: 'Этот регион уже максимально укреплён.' };
+  }
+
+  const cost = { wood: 45, stone: 55, gold: 35 };
+  if (!canAfford(kingdom.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно ресурсов для укреплений.' };
+  }
+
+  payCost(kingdom.resources, cost);
+  region.fortLevel += 1;
+  region.control = clampNumber(region.control + 3, 20, 100);
+
+  for (const holdingItem of world.holdings.filter((item) => item.regionId === region.id)) {
+    holdingItem.garrison = clampResource(holdingItem.garrison + 8);
+  }
+
+  pushEvent(world, 'construction', 'Регион укреплён', `${kingdom.name}: ${region.name} получает новый уровень укреплений.`, kingdom.id);
+  return { ok: true };
+}
+
+function emergencyLevy(world, socketId, payload) {
+  const kingdom = getActionKingdom(world, socketId, payload.kingdomId);
+
+  if (!kingdom) {
+    return { ok: false, reason: 'Держава недоступна.' };
+  }
+
+  const cost = { gold: 45, food: 60 };
+  if (!canAfford(kingdom.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно припасов для чрезвычайного набора.' };
+  }
+
+  payCost(kingdom.resources, cost);
+  kingdom.resources.army = clampResource(kingdom.resources.army + 70);
+  kingdom.resources.population = Math.max(220, kingdom.resources.population - 24);
+  kingdom.resources.stability = clampNumber(kingdom.resources.stability - 5, 0, 100);
+  kingdom.resources.prosperity = clampNumber(kingdom.resources.prosperity - 3, 0, 100);
+  kingdom.resources.threat = clampNumber(kingdom.resources.threat + 2, 0, 100);
+
+  const army = world.armies.find((item) => item.kingdomId === kingdom.id);
+  if (army) {
+    army.strength = kingdom.resources.army;
+    army.morale = clampNumber(army.morale - 4, 20, 100);
+    army.status = 'levying';
+  }
+
+  pushEvent(world, 'army', 'Чрезвычайный набор', `${kingdom.name}: деревни выставляют ополчение. Армия растёт, но народ устал.`, kingdom.id);
+  return { ok: true };
+}
+
+function holdFestival(world, socketId, payload) {
+  const kingdom = getActionKingdom(world, socketId, payload.kingdomId);
+
+  if (!kingdom) {
+    return { ok: false, reason: 'Держава недоступна.' };
+  }
+
+  const cost = { gold: 80, food: 90, influence: 6 };
+  if (!canAfford(kingdom.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно ресурсов для праздника.' };
+  }
+
+  payCost(kingdom.resources, cost);
+  kingdom.resources.stability = clampNumber(kingdom.resources.stability + 6, 0, 100);
+  kingdom.resources.prosperity = clampNumber(kingdom.resources.prosperity + 5, 0, 100);
+  kingdom.resources.threat = clampNumber(kingdom.resources.threat - 3, 0, 100);
+  kingdom.resources.influence = clampResource(kingdom.resources.influence + 2);
+
+  pushEvent(world, 'success', 'Праздник короны', `${kingdom.name}: площади полны огней, слухи стихают, доверие к власти растёт.`, kingdom.id);
+  return { ok: true };
+}
+
+function fundResearch(world, socketId, payload) {
+  const kingdom = getActionKingdom(world, socketId, payload.kingdomId);
+
+  if (!kingdom) {
+    return { ok: false, reason: 'Держава недоступна.' };
+  }
+
+  const cost = { gold: 75, influence: 10 };
+  if (!canAfford(kingdom.resources, cost)) {
+    return { ok: false, reason: 'Недостаточно золота и влияния для исследований.' };
+  }
+
+  payCost(kingdom.resources, cost);
+  const bonus = kingdom.policies.research === 'engineering' ? 28 : kingdom.policies.research === 'military' ? 24 : 22;
+  kingdom.resources.technology = clampResource(kingdom.resources.technology + bonus);
+  kingdom.resources.prosperity = clampNumber(kingdom.resources.prosperity + 1, 0, 100);
+
+  pushEvent(world, 'research', 'Исследования профинансированы', `${kingdom.name}: мастерские и архивы получают казённые гранты. Технологии +${bonus}.`, kingdom.id, { technology: bonus });
+  return { ok: true };
+}
+
 function setPolicy(world, socketId, payload) {
   const kingdom = getActionKingdom(world, socketId, payload.kingdomId);
   const policy = payload.policy;
@@ -888,6 +1106,7 @@ function advanceOneDay(world) {
   }
 
   world.time.season = getSeason(world.time.day);
+  expireDiplomaticTreaties(world);
 
   for (const kingdom of world.kingdoms) {
     applyKingdomEconomy(world, kingdom);
@@ -911,6 +1130,28 @@ function getSeason(day) {
   if (day <= 180) return 'Summer';
   if (day <= 270) return 'Autumn';
   return 'Winter';
+}
+
+function expireDiplomaticTreaties(world) {
+  const active = [];
+
+  for (const treaty of world.diplomacy.treaties) {
+    const signedDay = treaty.signedDay ?? world.time.day;
+    const signedYear = treaty.signedYear ?? world.time.year;
+    const age = (world.time.year - signedYear) * 360 + world.time.day - signedDay;
+    if (age <= (treaty.durationDays ?? 72)) {
+      active.push(treaty);
+      continue;
+    }
+
+    const from = world.kingdoms.find((item) => item.id === treaty.fromKingdomId);
+    const to = world.kingdoms.find((item) => item.id === treaty.toKingdomId);
+    if (from && to) {
+      pushEvent(world, 'diplomacy', 'Договор истёк', `${from.name} и ${to.name} должны заново подтвердить условия договора.`, from.id);
+    }
+  }
+
+  world.diplomacy.treaties = active;
 }
 
 function applyKingdomEconomy(world, kingdom) {
@@ -983,6 +1224,8 @@ function applyKingdomEconomy(world, kingdom) {
     delta.army += 0.75 * militaryMultiplier;
   }
 
+  applyTreatyEconomy(world, kingdom, delta);
+
   for (const key of ['gold', 'food', 'wood', 'stone', 'iron', 'influence', 'technology']) {
     kingdom.resources[key] = clampResource(kingdom.resources[key] + (delta[key] ?? 0));
   }
@@ -1007,6 +1250,20 @@ function applyKingdomEconomy(world, kingdom) {
     army.strength = kingdom.resources.army;
     army.morale = clampNumber(army.morale + kingdom.resources.stability / 320 - kingdom.resources.threat / 360, 20, 100);
   }
+}
+
+function applyTreatyEconomy(world, kingdom, delta) {
+  const treaties = world.diplomacy.treaties.filter((treaty) => treaty.fromKingdomId === kingdom.id || treaty.toKingdomId === kingdom.id);
+  const tradeTreaties = treaties.filter((treaty) => treaty.type === 'trade').length;
+  const peaceTreaties = treaties.filter((treaty) => treaty.type === 'non_aggression').length;
+  const researchTreaties = treaties.filter((treaty) => treaty.type === 'research').length;
+
+  delta.gold += tradeTreaties * 3;
+  delta.food += tradeTreaties * 1;
+  delta.influence += treaties.length * 0.15;
+  delta.technology += researchTreaties * 1.2;
+  delta.threat -= peaceTreaties * 0.16;
+  delta.prosperity += tradeTreaties * 0.08 + researchTreaties * 0.05;
 }
 
 function advanceConstruction(world, kingdom) {
@@ -1079,6 +1336,38 @@ function runAi(world) {
       pushEvent(world, 'army', 'Набор войск', `${kingdom.name} усиливает гарнизоны.`, kingdom.id);
     }
 
+    const ownRegions = world.regions.filter((item) => item.kingdomId === kingdom.id);
+    const weakestRegion = ownRegions.sort((a, b) => (a.control + a.fortLevel * 8) - (b.control + b.fortLevel * 8))[0];
+    if (weakestRegion && kingdom.resources.threat > 30 && Math.random() < 0.34) {
+      performAiAction(world, kingdom, 'army:patrol', { kingdomId: kingdom.id, regionId: weakestRegion.id });
+    }
+
+    if (weakestRegion && weakestRegion.fortLevel < 5 && kingdom.resources.stone > 180 && kingdom.resources.wood > 140 && Math.random() < 0.18) {
+      performAiAction(world, kingdom, 'army:fortify', { kingdomId: kingdom.id, regionId: weakestRegion.id });
+    }
+
+    if (kingdom.resources.stability < 62 && kingdom.resources.gold > 180 && kingdom.resources.food > 150 && Math.random() < 0.22) {
+      performAiAction(world, kingdom, 'kingdom:holdFestival', { kingdomId: kingdom.id });
+    }
+
+    if (kingdom.resources.gold > 250 && kingdom.resources.influence > 45 && Math.random() < 0.18) {
+      performAiAction(world, kingdom, 'technology:fundResearch', { kingdomId: kingdom.id });
+    }
+
+    if (kingdom.resources.influence > 50 && Math.random() < 0.14) {
+      const friendly = world.kingdoms
+        .filter((target) => target.id !== kingdom.id)
+        .filter((target) => (world.diplomacy.relations[kingdom.id]?.[target.id] ?? 0) > 68)
+        .find((target) => !world.diplomacy.treaties.some((treaty) => (
+          treaty.type === 'trade'
+          && [treaty.fromKingdomId, treaty.toKingdomId].includes(kingdom.id)
+          && [treaty.fromKingdomId, treaty.toKingdomId].includes(target.id)
+        )));
+      if (friendly) {
+        performAiAction(world, kingdom, 'diplomacy:proposeTreaty', { fromKingdomId: kingdom.id, toKingdomId: friendly.id, treatyType: 'trade' });
+      }
+    }
+
     if (kingdom.resources.threat > 44 && kingdom.resources.army > 210 && Math.random() < 0.2) {
       const possibleTargets = world.regions.filter((item) => item.kingdomId !== kingdom.id);
       const target = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
@@ -1087,7 +1376,7 @@ function runAi(world) {
   }
 }
 
-function raidRegionByAi(world, kingdom, target) {
+function performAiAction(world, kingdom, type, payload) {
   const pseudoSocket = `ai-${kingdom.id}`;
   world.players.set(pseudoSocket, {
     id: pseudoSocket,
@@ -1095,8 +1384,13 @@ function raidRegionByAi(world, kingdom, target) {
     mode: 'admin',
     selectedKingdomId: kingdom.id,
   });
-  raidRegion(world, pseudoSocket, { kingdomId: kingdom.id, targetRegionId: target.id });
+  const result = dispatchWorldAction(world, pseudoSocket, { type, payload });
   world.players.delete(pseudoSocket);
+  return result;
+}
+
+function raidRegionByAi(world, kingdom, target) {
+  performAiAction(world, kingdom, 'army:raid', { kingdomId: kingdom.id, targetRegionId: target.id });
 }
 
 function applyRandomEvent(world) {
